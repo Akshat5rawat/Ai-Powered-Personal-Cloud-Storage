@@ -79,18 +79,22 @@ export default function Files() {
       const file = files.find(f => f._id === id);
       const filename = file ? file.filename : 'download';
       
-      // Create a temporary link and trigger download
+      // Fetch the file as a blob to enable proper download
+      const response = await fetch(presignedUrl);
+      const blob = await response.blob();
+      
+      // Create a blob URL and trigger download
+      const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = presignedUrl;
+      link.href = blobUrl;
       link.download = filename;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
       document.body.appendChild(link);
       link.click();
       
-      // Cleanup after a short delay
+      // Cleanup
       setTimeout(() => {
         document.body.removeChild(link);
+        window.URL.revokeObjectURL(blobUrl);
       }, 100);
     } catch (err) {
       console.error('Download failed:', err);

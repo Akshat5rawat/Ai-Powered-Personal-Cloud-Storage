@@ -193,19 +193,46 @@ async def process_file(payload: ProcessInput):
                             continue
 
         elif any(x in mimetype for x in ['pdf', 'text', 'msword', 'officedocument']):
-            try:
-                txt = buffer.decode('utf-8', errors='ignore')
-            except Exception:
-                txt = key.split('/')[-1]
+            # For PDFs and Office docs, use filename for categorization
+            filename = key.split('/')[-1].lower()
+            
+            # Try to extract text for embedding (only for plain text files)
+            if 'text' in mimetype:
+                try:
+                    txt = buffer.decode('utf-8', errors='ignore')
+                except Exception:
+                    txt = filename
+            else:
+                # For PDFs/Office docs, use filename instead of binary content
+                txt = filename.replace('_', ' ').replace('-', ' ')
             
             # Limit text length for SBERT to prevent crashes on massive files
             embedding = embedding_from_text_sbert(txt[:5000]) 
             
-            if 'invoice' in txt.lower(): category = 'invoice'
-            elif 'resume' in txt.lower() or 'cv' in txt.lower(): category = 'resume'
-            elif 'report' in txt.lower(): category = 'report'
-            elif 'note' in txt.lower(): category = 'notes'
-            else: category = 'document'
+            # Categorize based on mimetype first, then filename
+            if 'presentation' in mimetype or filename.endswith(('.ppt', '.pptx')):
+                category = 'presentation'
+            elif 'spreadsheet' in mimetype or filename.endswith(('.xls', '.xlsx', '.csv')):
+                category = 'spreadsheet'
+            elif 'pdf' in mimetype or filename.endswith('.pdf'):
+                # Check filename for common document types
+                if any(word in filename for word in ['invoice', 'bill', 'receipt']):
+                    category = 'invoice'
+                elif any(word in filename for word in ['resume', 'cv']):
+                    category = 'resume'
+                elif any(word in filename for word in ['report', 'analysis']):
+                    category = 'report'
+                else:
+                    category = 'pdf'
+            elif 'text' in mimetype:
+                if any(word in txt.lower() for word in ['invoice', 'bill']):
+                    category = 'invoice'
+                elif any(word in txt.lower() for word in ['note', 'memo']):
+                    category = 'notes'
+                else:
+                    category = 'text'
+            else:
+                category = 'document'
             
             if h:
                 existing = files_col.find_one({'hash': h, '_id': { '$ne': ObjectId(file_id) }})
