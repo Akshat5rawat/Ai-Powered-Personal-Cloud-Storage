@@ -1,15 +1,7 @@
 # Dependencies
-node_modules/
-__pycache__/
-*.pyc
-*.pyo
-
-# Environment variables
-.env
-.env.local
+node_modules
 
 # Build outputs
-build/
 dist/
 
 # Logs
