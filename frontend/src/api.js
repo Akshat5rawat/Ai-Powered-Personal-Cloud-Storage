@@ -11,7 +11,7 @@ const getApiUrl = () => {
   }
   
   // Otherwise, use the current IP/hostname with backend port
-  return `http://${hostname}:5000` || DEFAULT_PROD_API;
+  return DEFAULT_PROD_API || `http://${hostname}:5000`;
 };
 
 const API_URL = getApiUrl();
