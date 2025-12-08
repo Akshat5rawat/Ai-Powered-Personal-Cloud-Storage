@@ -11,7 +11,7 @@ const getApiUrl = () => {
   }
   
   // Otherwise, use the current IP/hostname with backend port
-  return `http://${hostname}:5000` || 'https://vercel.com/akshat5rawats-projects/ai-powered-personal-cloud-backend';
+  return `http://${hostname}:5000`,'https://vercel.com/akshat5rawats-projects/ai-powered-personal-cloud-backend';
 };
 
 const API_URL = getApiUrl();
