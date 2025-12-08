@@ -3,3 +3,217 @@
 @tailwind utilities;
 
 body { @apply bg-gray-100; }
+
+/* Dashboard Styles */
+.dashboard-container {
+  @apply py-12 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto;
+}
+
+.dashboard-hero {
+  @apply text-center mb-16;
+  animation: fadeInDown 0.6s ease-out;
+}
+
+.dashboard-title {
+  @apply text-4xl md:text-5xl font-bold text-gray-900 mb-4;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.dashboard-subtitle {
+  @apply text-lg md:text-xl text-gray-600 max-w-2xl mx-auto;
+}
+
+/* Quick Upload Section */
+.quick-upload-section {
+  @apply mb-12;
+  animation: fadeInUp 0.6s ease-out;
+}
+
+.upload-card {
+  @apply bg-white rounded-2xl p-8 shadow-lg border border-gray-100;
+}
+
+.upload-title {
+  @apply text-2xl font-bold text-gray-900 mb-6;
+}
+
+.upload-form {
+  @apply flex gap-4 flex-col md:flex-row;
+}
+
+.file-input-wrapper {
+  @apply flex-1 relative;
+}
+
+.file-input {
+  @apply absolute opacity-0 w-full h-full cursor-pointer;
+}
+
+.file-input-label {
+  @apply block bg-gray-100 border-2 border-dashed border-gray-300 rounded-lg p-4 text-center text-gray-600 font-medium hover:border-purple-500 hover:bg-purple-50 transition-all;
+}
+
+.upload-button {
+  @apply bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold py-3 px-8 rounded-lg hover:shadow-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed md:self-end;
+}
+
+.progress-bar {
+  @apply h-1 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-300 mt-2;
+}
+
+/* Dashboard Cards */
+.dashboard-cards {
+  @apply grid grid-cols-1 md:grid-cols-3 gap-8 mb-12;
+}
+
+.dashboard-card {
+  @apply bg-white rounded-2xl p-8 shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 border border-gray-100;
+  animation: fadeInUp 0.6s ease-out;
+}
+
+.dashboard-card.clickable {
+  @apply cursor-pointer;
+}
+
+.dashboard-card:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.dashboard-card:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+.card-icon {
+  @apply text-5xl mb-4 text-center;
+  display: inline-block;
+  width: 100%;
+  animation: bounce 2s infinite;
+}
+
+.dashboard-card:nth-child(2) .card-icon {
+  animation-delay: 0.2s;
+}
+
+.dashboard-card:nth-child(3) .card-icon {
+  animation-delay: 0.4s;
+}
+
+.card-title {
+  @apply text-2xl font-bold text-gray-900 mb-2 text-center;
+}
+
+.card-description {
+  @apply text-gray-600 text-center mb-4;
+}
+
+.card-stat {
+  @apply text-sm font-semibold text-purple-600 text-center mt-4 p-3 bg-purple-50 rounded-lg;
+}
+
+/* Storage Section */
+.storage-section {
+  @apply mb-12;
+  animation: fadeInUp 0.6s ease-out 0.1s both;
+}
+
+.storage-card {
+  @apply bg-white rounded-2xl p-8 shadow-lg border border-gray-100;
+}
+
+.storage-title {
+  @apply text-2xl font-bold text-gray-900 mb-6;
+}
+
+.storage-info {
+  @apply text-center mb-4;
+}
+
+.storage-used {
+  @apply text-4xl font-bold text-gray-900;
+}
+
+.storage-quota {
+  @apply text-sm text-gray-600;
+}
+
+.storage-bar {
+  @apply h-3 bg-gray-200 rounded-full overflow-hidden mb-3;
+}
+
+.storage-progress {
+  @apply h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-300;
+}
+
+.storage-percent {
+  @apply text-center text-sm font-semibold text-gray-600;
+}
+
+/* Recent Files Section */
+.recent-section {
+  animation: fadeInUp 0.6s ease-out 0.2s both;
+}
+
+.recent-title {
+  @apply text-2xl font-bold text-gray-900 mb-6;
+}
+
+.files-list {
+  @apply bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden;
+}
+
+.file-item {
+  @apply grid grid-cols-3 gap-4 p-5 border-b border-gray-100 hover:bg-gray-50 transition-colors items-center;
+}
+
+.file-item:last-child {
+  @apply border-b-0;
+}
+
+.file-name {
+  @apply font-medium text-gray-900 truncate;
+}
+
+.file-size {
+  @apply text-sm text-gray-600 text-right;
+}
+
+.file-date {
+  @apply text-sm text-gray-500 text-right;
+}
+
+/* Animations */
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+
