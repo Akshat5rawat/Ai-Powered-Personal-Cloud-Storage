@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies required for pillow, opencv, etc.
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
@@ -17,7 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt ./
 
-RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
+# 1. Install CPU-only Torch explicitly first (This saves massive space)
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# 2. Install the rest of the requirements
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
