@@ -1,5 +1,5 @@
 import axios from 'axios';
-const DEFAULT_PROD_API = 'https://ai-powered-personal-cloud-storage-6.vercel.app/'; 
+const DEFAULT_PROD_API = 'https://ai-powered-personal-cloud-storage.onrender.com/'; 
 // Automatically detect the current host and use it for API calls
 const getApiUrl = () => {
   // Get the current window location
