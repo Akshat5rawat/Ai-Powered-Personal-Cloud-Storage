@@ -53,5 +53,4 @@ services:
     #   - ./ai-service:/app
 
 volumes:
-volumes:
   mongo_data:
