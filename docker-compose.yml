@@ -10,20 +10,6 @@ services:
     ports:
       - 27017:27017
 
-  minio:
-    image: minio/minio:latest
-    container_name: ai_personal_cloud_minio
-    restart: unless-stopped
-    environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
-    volumes:
-      - minio_data:/data
-    ports:
-      - 9000:9000
-      - 9001:9001
-    command: server /data --console-address ":9001"
-
   backend:
     build: ./backend
     container_name: ai_personal_cloud_backend
@@ -32,7 +18,6 @@ services:
       - ./backend/.env
     depends_on:
       - mongo
-      - minio
       - ai-service
     ports:
       - 5000:5000
@@ -62,12 +47,11 @@ services:
       - ./ai-service/.env
     depends_on:
       - mongo
-      - minio
     ports:
       - 8000:8000
     # volumes:
     #   - ./ai-service:/app
 
 volumes:
+volumes:
   mongo_data:
-  minio_data:

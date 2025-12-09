@@ -15,4 +15,4 @@ python-magic
 cryptography
 pymongo
 python-dotenv
-minio
+supabase

@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import hashlib
-from minio import Minio
+# [CHANGED] Import Supabase
+from supabase import create_client, Client
 from pymongo import MongoClient
 from bson import ObjectId
 import math
@@ -17,7 +18,6 @@ try:
     from imagehash import hex_to_hash
 except Exception:
     def hex_to_hash(s):
-        # fallback: return None
         return None
 
 from sentence_transformers import SentenceTransformer
@@ -36,41 +36,36 @@ clip_model_name = 'openai/clip-vit-base-patch32'
 clip_model = CLIPModel.from_pretrained(clip_model_name)
 clip_processor = CLIPProcessor.from_pretrained(clip_model_name)
 
-# Setup Minio
-MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT')
-MINIO_PORT = os.getenv('MINIO_PORT')
-# ensure endpoint contains port
-if MINIO_PORT:
-    minio_endpoint = f"{MINIO_ENDPOINT}:{MINIO_PORT}"
+# [CHANGED] Setup Supabase
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+# Use Service Role Key for backend access
+SUPABASE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY') 
+SUPABASE_BUCKET = os.getenv('SUPABASE_BUCKET', 'files')
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set.")
+    supabase = None
 else:
-    minio_endpoint = MINIO_ENDPOINT
-
-minio_client = Minio(
-    minio_endpoint,
-    access_key=os.getenv('MINIO_ACCESS_KEY'),
-    secret_key=os.getenv('MINIO_SECRET_KEY'),
-    secure=False,
-)
-bucket = os.getenv('MINIO_BUCKET', 'files')
-
-# Ensure bucket exists on startup
-try:
-    if not minio_client.bucket_exists(bucket):
-        minio_client.make_bucket(bucket)
-        print(f"Created bucket: {bucket}")
-except Exception as e:
-    print("Minio bucket check failed:", e)
-
+    try:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print(f"Supabase client initialized for bucket: {SUPABASE_BUCKET}")
+    except Exception as e:
+        print(f"Supabase init failed: {e}")
+        supabase = None
 # Mongo
 mongo_client = MongoClient(os.getenv('MONGO_URI'))
-db = mongo_client.get_default_database()
+try:
+    db = mongo_client.get_default_database()
+except Exception:
+    db = mongo_client['ai_personal_cloud']
+
 files_col = db['files']
 
 app = FastAPI(title='AI Microservice')
 
 class ProcessInput(BaseModel):
     fileId: str
-    minioKey: str
+    minioKey: str # Keeping this name to maintain compatibility with Node.js backend
     mimetype: Optional[str]
 
 class QueryInput(BaseModel):
@@ -79,9 +74,15 @@ class QueryInput(BaseModel):
 
 # utility
 
-def download_from_minio(key):
-    data = minio_client.get_object(bucket, key)
-    return data.read()
+# [CHANGED] Download from Supabase Storage
+def download_from_supabase(key):
+    if not supabase:
+        raise Exception("Supabase client not initialized")
+    
+    # storage.from_() is used because 'from' is a reserved keyword in Python
+    # download() returns bytes directly
+    data = supabase.storage.from_(SUPABASE_BUCKET).download(key)
+    return data
 
 
 def sha256_hash(buffer):
@@ -129,17 +130,16 @@ async def process_file(payload: ProcessInput):
     file_id = payload.fileId
     mimetype = (payload.mimetype or '').lower()
 
-    # 1. Validate ID immediately
     if not ObjectId.is_valid(file_id):
         raise HTTPException(status_code=400, detail=f"Invalid ObjectId: {file_id}")
 
     try:
-        # 2. Safe MinIO Download
+        # [CHANGED] Safe Supabase Download
         try:
-            buffer = download_from_minio(key)
+            buffer = download_from_supabase(key)
         except Exception as e:
-            print(f"MinIO Error for key {key}: {e}")
-            raise HTTPException(status_code=404, detail=f"Could not download file from MinIO: {str(e)}")
+            print(f"Supabase Error for key {key}: {e}")
+            raise HTTPException(status_code=404, detail=f"Could not download file from Supabase: {str(e)}")
 
         # SHA256
         h = sha256_hash(buffer)
@@ -153,7 +153,7 @@ async def process_file(payload: ProcessInput):
         duplicate_of = None
         user_id = None
 
-        # 3. Safe User Fetch
+        # Fetch User from Mongo
         file_doc = files_col.find_one({'_id': ObjectId(file_id)})
         if file_doc:
             user_id = file_doc.get('userId')

@@ -6,7 +6,7 @@ const path = require('path');
 
 const auth = require('../middleware/auth');
 const File = require('../models/File');
-const minio = require('../services/minioService');
+const storageService = require('../services/supabaseService');
 const axios = require('axios');
 const aiService = require('../services/aiService');
 const { sha256 } = require('../utils/crypto');
@@ -27,8 +27,8 @@ router.post('/upload', auth, upload.single('file'), async (req, res) => {
     // compute SHA256 hash in backend (fallback)
     const hash = sha256(buffer);
 
-    // upload to minio
-    await minio.uploadBuffer(buffer, key, size, { 'content-type': mimetype });
+    // upload to Supabase Storage
+    await storageService.uploadBuffer(buffer, key, size, { 'Content-Type': mimetype });
 
     // create file record
     const fileRecord = new File({
@@ -95,7 +95,7 @@ router.get('/download/:id', auth, async (req, res) => {
     const fileRecord = await File.findById(req.params.id);
     if (!fileRecord) return res.status(404).json({ message: 'Not found' });
     if (fileRecord.userId.toString() !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
-    const url = await minio.presignedUrl(fileRecord.minioKey);
+    const url = await storageService.presignedUrl(fileRecord.minioKey);
     res.json({ url });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -132,7 +132,7 @@ router.delete('/:id', auth, async (req, res) => {
       }
     }
 
-    await minio.removeObject(fileRecord.minioKey);
+    await storageService.removeObject(fileRecord.minioKey);
     await File.deleteOne({ _id: fileRecord._id });
     res.json({ message: 'Deleted' });
   } catch (err) {

@@ -9,7 +9,7 @@ const authRoutes = require('./routes/auth');
 const fileRoutes = require('./routes/files');
 const searchRoutes = require('./routes/search');
 const aiRoutes = require('./routes/ai');
-const minioService = require('./services/minioService');
+const storageService = require('./services/supabaseService');
 
 const app = express();
 app.use(cors());
@@ -32,10 +32,10 @@ mongoose.connect(process.env.MONGO_URI, {
 }).then(async () => {
   console.log('Connected to MongoDB');
   try {
-    await minioService.ensureBucket();
-    console.log('Ensured minio bucket exists');
+    await storageService.ensureBucket();
+    console.log('Ensured Supabase Storage bucket exists');
   } catch (err) {
-    console.warn('Failed to ensure minio bucket on startup', err.message);
+    console.warn('Failed to ensure Supabase Storage bucket on startup', err.message);
   }
   app.listen(process.env.PORT || 5000, () => {
     console.log(`Server listening on port ${process.env.PORT || 5000}`);
