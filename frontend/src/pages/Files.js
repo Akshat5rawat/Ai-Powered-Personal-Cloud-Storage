@@ -1,14 +1,21 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import client from '../api';
+import { isAuthenticated } from '../utils/auth';
 
 export default function Files() {
   const [files, setFiles] = useState([]);
   const [previewFile, setPreviewFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
+  const navigate = useNavigate();
   
   useEffect(() => {
+    if (!isAuthenticated()) {
+      navigate('/login');
+      return;
+    }
     client.get('/files').then(res => setFiles(res.data));
-  }, []);
+  }, [navigate]);
 
   const preview = async (id) => {
     try {

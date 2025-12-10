@@ -1,9 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import client from '../api';
+import { isAuthenticated } from '../utils/auth';
 
 export default function Search() {
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      navigate('/login');
+    }
+  }, [navigate]);
   const doSearch = async (e) => {
     e.preventDefault();
     try {
