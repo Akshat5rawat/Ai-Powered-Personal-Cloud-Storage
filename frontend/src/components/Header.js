@@ -13,14 +13,9 @@ export default function Header() {
       setLoggedIn(authenticated);
       
       if (authenticated) {
-        // Try to get user email from token (basic decode)
-        try {
-          const token = localStorage.getItem('token');
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          setUser({ email: localStorage.getItem('userEmail') || 'User' });
-        } catch (e) {
-          setUser({ email: 'User' });
-        }
+        // Get username from localStorage
+        const username = localStorage.getItem('username');
+        setUser({ username: username || 'User' });
       } else {
         setUser(null);
       }
@@ -34,7 +29,7 @@ export default function Header() {
 
   const logout = () => {
     localStorage.removeItem('token');
-    localStorage.removeItem('userEmail');
+    localStorage.removeItem('username');
     setLoggedIn(false);
     setUser(null);
     navigate('/login');
@@ -54,7 +49,7 @@ export default function Header() {
         <div className="ml-auto flex gap-3 items-center">
           {loggedIn ? (
             <>
-              {user && <span className="text-sm text-gray-600">{user.email}</span>}
+              {user && <span className="text-sm text-gray-600">Welcome, {user.username}</span>}
               <button onClick={logout} className="text-sm text-red-600 hover:text-red-800 font-medium">
                 Logout
               </button>

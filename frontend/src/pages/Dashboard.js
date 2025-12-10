@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import client from '../api';
+import { isAuthenticated } from '../utils/auth';
 
 export default function Dashboard() {
   const [stats, setStats] = useState({ totalFiles: 0, totalSize: 0 });
@@ -13,8 +14,12 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    if (!isAuthenticated()) {
+      navigate('/login');
+      return;
+    }
     loadDashboardData();
-  }, []);
+  }, [navigate]);
 
   const loadDashboardData = async () => {
     try {
