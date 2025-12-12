@@ -9,6 +9,9 @@ export default function Upload() {
   const [uploadProgress, setUploadProgress] = useState({});
   const [dragActive, setDragActive] = useState(false);
   const [completedUploads, setCompletedUploads] = useState([]);
+  const [duplicateModal, setDuplicateModal] = useState(null);
+  const [pendingUpload, setPendingUpload] = useState(null);
+  const [savedDuplicates, setSavedDuplicates] = useState([]);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -56,6 +59,114 @@ export default function Upload() {
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
+  // Check for duplicate before upload
+  const checkDuplicate = async (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      const response = await client.post('/files/check-duplicate', form, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      return response.data;
+    } catch (err) {
+      console.error('Duplicate check failed:', err);
+      return { isDuplicate: false };
+    }
+  };
+
+  // Upload a single file
+  const uploadFile = async (file, index, progressMap) => {
+    const form = new FormData();
+    form.append('file', file);
+    
+    await client.post('/files/upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (progressEvent) => {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        progressMap[index] = percentCompleted;
+        setUploadProgress({ ...progressMap });
+      }
+    });
+    
+    setCompletedUploads(prev => [...prev, index]);
+    progressMap[index] = 100;
+    setUploadProgress({ ...progressMap });
+  };
+
+  // Handle user decision on duplicate
+  const handleDuplicateDecision = async (keepDuplicate) => {
+    if (!pendingUpload) return;
+    
+    const { file, index, progressMap, remainingFiles } = pendingUpload;
+    
+    if (keepDuplicate) {
+      // User wants to save the duplicate
+      try {
+        await uploadFile(file, index, progressMap);
+        setSavedDuplicates(prev => [...prev, index]); // Track as saved duplicate
+      } catch (err) {
+        alert(`Failed to upload ${file.name}: ${err.response?.data?.message || err.message}`);
+      }
+    } else {
+      // User wants to skip/delete this duplicate
+      progressMap[index] = -1; // Mark as skipped
+      setUploadProgress({ ...progressMap });
+    }
+    
+    setDuplicateModal(null);
+    setPendingUpload(null);
+    
+    // Continue with remaining files
+    await processRemainingFiles(remainingFiles, progressMap);
+  };
+
+  // Process remaining files after duplicate decision
+  const processRemainingFiles = async (remainingFiles, progressMap) => {
+    for (let i = 0; i < remainingFiles.length; i++) {
+      const { file, index } = remainingFiles[i];
+      
+      try {
+        // Check for duplicate
+        const duplicateCheck = await checkDuplicate(file);
+        
+        if (duplicateCheck.isDuplicate) {
+          // Show modal and wait for user decision
+          setDuplicateModal({
+            filename: file.name,
+            duplicateOf: duplicateCheck.duplicateOf.filename,
+            message: duplicateCheck.message
+          });
+          setPendingUpload({
+            file,
+            index,
+            progressMap,
+            remainingFiles: remainingFiles.slice(i + 1)
+          });
+          return; // Stop processing, wait for user decision
+        }
+        
+        // No duplicate, proceed with upload
+        await uploadFile(file, index, progressMap);
+        
+      } catch (err) {
+        alert(`Failed to upload ${file.name}: ${err.response?.data?.message || err.message}`);
+      }
+    }
+    
+    // All files processed
+    finishUpload();
+  };
+
+  const finishUpload = () => {
+    setTimeout(() => {
+      setFiles([]);
+      setUploadProgress({});
+      setCompletedUploads([]);
+      setSavedDuplicates([]);
+      setUploading(false);
+    }, 2000);
+  };
+
   const handle = async (e) => {
     e.preventDefault();
     if (files.length === 0) {
@@ -67,42 +178,11 @@ export default function Upload() {
     setCompletedUploads([]);
     const progressMap = {};
     
-    try {
-      // Upload files sequentially
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const form = new FormData();
-        form.append('file', file);
-        
-        try {
-          await client.post('/files/upload', form, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-            onUploadProgress: (progressEvent) => {
-              const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-              progressMap[i] = percentCompleted;
-              setUploadProgress({ ...progressMap });
-            }
-          });
-          
-          setCompletedUploads(prev => [...prev, i]);
-          progressMap[i] = 100;
-          setUploadProgress({ ...progressMap });
-          
-        } catch (err) {
-          alert(`Failed to upload ${file.name}: ${err.response?.data?.message || err.message}`);
-        }
-      }
-      
-      // Clear after 2 seconds
-      setTimeout(() => {
-        setFiles([]);
-        setUploadProgress({});
-        setCompletedUploads([]);
-      }, 2000);
-      
-    } finally {
-      setUploading(false);
-    }
+    // Prepare file list with indices
+    const fileList = files.map((file, index) => ({ file, index }));
+    
+    // Start processing files
+    await processRemainingFiles(fileList, progressMap);
   };
 
   return (
@@ -205,13 +285,21 @@ export default function Upload() {
                     
                     <div className="flex items-center space-x-2">
                       {completedUploads.includes(index) && (
-                        <svg className="h-6 w-6 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                          <path
-                            fillRule="evenodd"
-                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
+                        <div className="flex flex-col items-center">
+                          <svg className="h-6 w-6 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path
+                              fillRule="evenodd"
+                              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          {savedDuplicates.includes(index) && (
+                            <span className="text-xs text-orange-500 font-medium">Duplicate</span>
+                          )}
+                        </div>
+                      )}
+                      {uploadProgress[index] === -1 && (
+                        <span className="text-sm text-orange-500 font-medium">Skipped (Duplicate)</span>
                       )}
                       {!uploading && !completedUploads.includes(index) && (
                         <button
@@ -232,7 +320,8 @@ export default function Upload() {
                   </div>
 
                   {/* Progress Bar for each file */}
-                  {uploading && uploadProgress[index] !== undefined && (
+                  {/* Progress Bar for each file */}
+                  {uploading && uploadProgress[index] !== undefined && uploadProgress[index] !== -1 && (
                     <div className="mt-3">
                       <div className="flex items-center justify-between text-sm mb-1">
                         <span className="text-gray-600">
@@ -274,6 +363,67 @@ export default function Upload() {
           <p>Files are processed automatically by AI for categorization and duplicate detection</p>
         </div>
       </div>
+
+      {/* Duplicate Detection Modal */}
+      {duplicateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-2xl">
+            {/* Warning Icon */}
+            <div className="flex justify-center mb-4">
+              <div className="bg-yellow-100 rounded-full p-3">
+                <svg className="h-8 w-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+            </div>
+
+            {/* Title */}
+            <h3 className="text-xl font-bold text-center text-gray-800 mb-2">
+              Duplicate File Detected
+            </h3>
+
+            {/* Message */}
+            <div className="text-center mb-6">
+              <p className="text-gray-600 mb-2">
+                <span className="font-semibold text-blue-600">"{duplicateModal.filename}"</span>
+              </p>
+              <p className="text-gray-600">
+                is a duplicate of
+              </p>
+              <p className="text-gray-600 mt-2">
+                <span className="font-semibold text-orange-600">"{duplicateModal.duplicateOf}"</span>
+              </p>
+            </div>
+
+            {/* Question */}
+            <p className="text-center text-gray-700 mb-6">
+              Do you want to save this duplicate file or skip it?
+            </p>
+
+            {/* Action Buttons */}
+            <div className="flex space-x-3">
+              <button
+                onClick={() => handleDuplicateDecision(false)}
+                className="flex-1 py-3 px-4 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                <span>Skip Duplicate</span>
+              </button>
+              <button
+                onClick={() => handleDuplicateDecision(true)}
+                className="flex-1 py-3 px-4 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                </svg>
+                <span>Save Duplicate</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

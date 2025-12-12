@@ -14,6 +14,51 @@ const { sha256 } = require('../utils/crypto');
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
+// Check for duplicates before upload (pre-upload check)
+router.post('/check-duplicate', auth, upload.single('file'), async (req, res) => {
+  try {
+    const buffer = req.file.buffer;
+    const originalname = req.file.originalname;
+    const userId = req.user.id;
+
+    // compute SHA256 hash
+    const hash = sha256(buffer);
+
+    // Check for existing file with same hash for this user
+    const existingByHash = await File.findOne({ hash, userId });
+    if (existingByHash) {
+      return res.json({
+        isDuplicate: true,
+        duplicateOf: {
+          id: existingByHash._id,
+          filename: existingByHash.filename,
+          createdAt: existingByHash.createdAt
+        },
+        message: `"${originalname}" is a duplicate of "${existingByHash.filename}"`
+      });
+    }
+
+    // Check for existing file with same filename for this user
+    const existingByName = await File.findOne({ filename: originalname, userId });
+    if (existingByName) {
+      return res.json({
+        isDuplicate: true,
+        duplicateOf: {
+          id: existingByName._id,
+          filename: existingByName.filename,
+          createdAt: existingByName.createdAt
+        },
+        message: `"${originalname}" already exists with the same name`
+      });
+    }
+
+    res.json({ isDuplicate: false });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Upload a file
 router.post('/upload', auth, upload.single('file'), async (req, res) => {
   try {
