@@ -77,6 +77,20 @@ async function presignedUrl(key, expirySeconds = 60 * 60) {
   return data.signedUrl;
 }
 
+async function downloadFile(key) {
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .download(key);
+  
+  if (error) {
+    throw error;
+  }
+  
+  // Convert blob to buffer
+  const arrayBuffer = await data.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
 function getObjectUrl(key) {
   // For Supabase, return the public URL (if bucket is public) or a signed URL
   const { data } = supabase.storage
@@ -90,6 +104,7 @@ module.exports = {
   uploadBuffer,
   removeObject,
   presignedUrl,
+  downloadFile,
   getObjectUrl,
   ensureBucket,
   supabase,
