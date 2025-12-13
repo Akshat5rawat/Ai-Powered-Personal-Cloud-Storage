@@ -9,6 +9,7 @@ const authRoutes = require('./routes/auth');
 const fileRoutes = require('./routes/files');
 const searchRoutes = require('./routes/search');
 const aiRoutes = require('./routes/ai');
+const shareRoutes = require('./routes/share');
 const storageService = require('./services/supabaseService');
 
 const app = express();
@@ -19,6 +20,7 @@ app.use('/auth', authRoutes);
 app.use('/files', fileRoutes);
 app.use('/search', searchRoutes);
 app.use('/ai', aiRoutes);
+app.use('/share', shareRoutes);
 
 app.get('/', (req, res) => {
   res.send('AI Personal Cloud Backend');
