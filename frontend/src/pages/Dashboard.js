@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import client from '../api';
 import { isAuthenticated } from '../utils/auth';
@@ -11,7 +11,26 @@ export default function Dashboard() {
   const [file, setFile] = useState(null);
   const [storageUsed, setStorageUsed] = useState(0);
   const [storageQuota] = useState(10 * 1024 * 1024 * 1024); // 10GB
+  const [shareStats, setShareStats] = useState({ totalShareLinks: 0, totalSharedFiles: 0, totalAccessCount: 0 });
+  const [analytics, setAnalytics] = useState({
+    fileTypes: {},
+    uploadsByDay: [],
+    largestFiles: [],
+    categoryCounts: {},
+    totalSharedFiles: 0,
+    averageFileSize: 0
+  });
   const navigate = useNavigate();
+
+  // Fetch real-time share stats
+  const loadShareStats = useCallback(async () => {
+    try {
+      const res = await client.get('/share/stats');
+      setShareStats(res.data);
+    } catch (err) {
+      console.error('Failed to load share stats:', err);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -19,7 +38,12 @@ export default function Dashboard() {
       return;
     }
     loadDashboardData();
-  }, [navigate]);
+    loadShareStats();
+    
+    // Auto-refresh share stats every 10 seconds for real-time updates
+    const interval = setInterval(loadShareStats, 10000);
+    return () => clearInterval(interval);
+  }, [navigate, loadShareStats]);
 
   const loadDashboardData = async () => {
     try {
@@ -33,9 +57,75 @@ export default function Dashboard() {
       });
       setStorageUsed(totalSize);
       setRecentFiles(files.slice(0, 5).reverse());
+      
+      // Calculate analytics
+      calculateAnalytics(files);
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
     }
+  };
+
+  const calculateAnalytics = (files) => {
+    // File types distribution
+    const fileTypes = {};
+    files.forEach(f => {
+      const ext = f.filename?.split('.').pop()?.toLowerCase() || 'unknown';
+      const type = getFileTypeCategory(f.mimetype, ext);
+      fileTypes[type] = (fileTypes[type] || 0) + 1;
+    });
+
+    // Uploads by day (last 7 days)
+    const last7Days = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toLocaleDateString('en-US', { weekday: 'short' });
+      const count = files.filter(f => {
+        const fileDate = new Date(f.createdAt);
+        return fileDate.toDateString() === date.toDateString();
+      }).length;
+      last7Days.push({ day: dateStr, count });
+    }
+
+    // Largest files (top 5)
+    const largestFiles = [...files]
+      .sort((a, b) => (b.size || 0) - (a.size || 0))
+      .slice(0, 5);
+
+    // AI Categories
+    const categoryCounts = {};
+    files.forEach(f => {
+      const category = f.aiCategory || 'Uncategorized';
+      categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+    });
+
+    // Shared files count
+    const totalSharedFiles = files.filter(f => f.shareLinks?.length > 0).length;
+
+    // Average file size
+    const averageFileSize = files.length > 0 
+      ? files.reduce((sum, f) => sum + (f.size || 0), 0) / files.length 
+      : 0;
+
+    setAnalytics({
+      fileTypes,
+      uploadsByDay: last7Days,
+      largestFiles,
+      categoryCounts,
+      totalSharedFiles,
+      averageFileSize
+    });
+  };
+
+  const getFileTypeCategory = (mimetype, ext) => {
+    if (mimetype?.startsWith('image/')) return 'Images';
+    if (mimetype?.startsWith('video/')) return 'Videos';
+    if (mimetype?.startsWith('audio/')) return 'Audio';
+    if (mimetype?.includes('pdf')) return 'PDFs';
+    if (mimetype?.includes('document') || mimetype?.includes('word') || ['doc', 'docx'].includes(ext)) return 'Documents';
+    if (mimetype?.includes('spreadsheet') || mimetype?.includes('excel') || ['xls', 'xlsx', 'csv'].includes(ext)) return 'Spreadsheets';
+    if (mimetype?.includes('zip') || mimetype?.includes('rar') || mimetype?.includes('compressed')) return 'Archives';
+    return 'Other';
   };
 
   const handleUpload = async (e) => {
@@ -148,6 +238,174 @@ export default function Dashboard() {
             <div className="storage-progress" style={{ width: `${storagePercent}%` }}></div>
           </div>
           <p className="storage-percent">{Math.round(storagePercent)}% used</p>
+        </div>
+      </div>
+
+      {/* Analytics Section */}
+      <div className="mb-12">
+        <h3 className="text-2xl font-bold text-gray-900 mb-6">Analytics</h3>
+        
+        {/* Analytics Cards Row */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition-all duration-300">
+            <div className="text-3xl mb-2">📊</div>
+            <p className="text-sm text-gray-600 mb-1">Total Files</p>
+            <p className="text-3xl font-bold text-gray-900">{stats.totalFiles}</p>
+          </div>
+          <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition-all duration-300">
+            <div className="text-3xl mb-2">📤</div>
+            <p className="text-sm text-gray-600 mb-1">Shared Files</p>
+            <p className="text-3xl font-bold text-gray-900">{shareStats.totalSharedFiles}</p>
+          </div>
+          <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition-all duration-300">
+            <div className="text-3xl mb-2">📏</div>
+            <p className="text-sm text-gray-600 mb-1">Avg File Size</p>
+            <p className="text-3xl font-bold text-gray-900">{formatBytes(analytics.averageFileSize)}</p>
+          </div>
+          <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition-all duration-300">
+            <div className="text-3xl mb-2">📂</div>
+            <p className="text-sm text-gray-600 mb-1">File Types</p>
+            <p className="text-3xl font-bold text-gray-900">{Object.keys(analytics.fileTypes).length}</p>
+          </div>
+        </div>
+
+        {/* File Types & Upload Activity */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          {/* File Types Distribution */}
+          <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100">
+            <h4 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <span>📁</span> File Types
+            </h4>
+            <div className="space-y-4">
+              {Object.entries(analytics.fileTypes).length > 0 ? (
+                Object.entries(analytics.fileTypes)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([type, count]) => {
+                    const percent = stats.totalFiles > 0 ? (count / stats.totalFiles) * 100 : 0;
+                    return (
+                      <div key={type}>
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="font-medium text-gray-700">{type}</span>
+                          <span className="text-gray-500">{count} files ({Math.round(percent)}%)</span>
+                        </div>
+                        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-500"
+                            style={{ width: `${percent}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    );
+                  })
+              ) : (
+                <p className="text-gray-500 text-center py-4">No files uploaded yet</p>
+              )}
+            </div>
+          </div>
+
+          {/* Upload Activity (Last 7 Days) */}
+          <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100">
+            <h4 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <span>📈</span> Upload Activity (Last 7 Days)
+            </h4>
+            <div className="flex items-end justify-between gap-2 h-40">
+              {analytics.uploadsByDay.map((day, index) => {
+                const maxCount = Math.max(...analytics.uploadsByDay.map(d => d.count), 1);
+                const height = day.count > 0 ? (day.count / maxCount) * 100 : 5;
+                return (
+                  <div key={index} className="flex-1 flex flex-col items-center gap-2">
+                    <div className="w-full flex flex-col items-center justify-end h-32">
+                      <span className="text-xs font-semibold text-gray-700 mb-1">{day.count}</span>
+                      <div 
+                        className="w-full bg-gradient-to-t from-purple-500 to-pink-400 rounded-t-lg transition-all duration-500 hover:from-purple-600 hover:to-pink-500"
+                        style={{ height: `${height}%`, minHeight: day.count > 0 ? '8px' : '4px' }}
+                      ></div>
+                    </div>
+                    <span className="text-xs text-gray-500">{day.day}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Storage Insights & Largest Files */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Storage Insights */}
+          <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100">
+            <h4 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <span>💾</span> Storage Insights
+            </h4>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">📊</span>
+                  <div>
+                    <p className="font-medium text-gray-800">Total Storage</p>
+                    <p className="text-sm text-gray-500">All files combined</p>
+                  </div>
+                </div>
+                <span className="text-xl font-bold text-purple-600">{formatBytes(stats.totalSize)}</span>
+              </div>
+              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">📈</span>
+                  <div>
+                    <p className="font-medium text-gray-800">Avg File Size</p>
+                    <p className="text-sm text-gray-500">Per file average</p>
+                  </div>
+                </div>
+                <span className="text-xl font-bold text-blue-600">{formatBytes(analytics.averageFileSize)}</span>
+              </div>
+              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">🔗</span>
+                  <div>
+                    <p className="font-medium text-gray-800">Shared Files</p>
+                    <p className="text-sm text-gray-500">{shareStats.totalShareLinks} active links</p>
+                  </div>
+                </div>
+                <span className="text-xl font-bold text-green-600">{shareStats.totalSharedFiles}</span>
+              </div>
+              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-orange-50 to-amber-50 rounded-xl">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">📁</span>
+                  <div>
+                    <p className="font-medium text-gray-800">File Types</p>
+                    <p className="text-sm text-gray-500">Different formats</p>
+                  </div>
+                </div>
+                <span className="text-xl font-bold text-orange-600">{Object.keys(analytics.fileTypes).length}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Largest Files */}
+          <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100">
+            <h4 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <span>📦</span> Largest Files
+            </h4>
+            <div className="space-y-3">
+              {analytics.largestFiles.length > 0 ? (
+                analytics.largestFiles.map((file, index) => (
+                  <div 
+                    key={file._id} 
+                    className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <span className="w-6 h-6 flex items-center justify-center bg-gradient-to-r from-purple-500 to-pink-500 text-white text-xs font-bold rounded-full">
+                      {index + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{file.filename}</p>
+                    </div>
+                    <span className="text-sm font-semibold text-purple-600">{formatBytes(file.size)}</span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-gray-500 text-center py-4">No files uploaded yet</p>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 

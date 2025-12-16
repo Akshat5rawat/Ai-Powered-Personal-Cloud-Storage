@@ -6,6 +6,7 @@ const path = require('path');
 
 const auth = require('../middleware/auth');
 const File = require('../models/File');
+const ShareLink = require('../models/ShareLink');
 const storageService = require('../services/supabaseService');
 const axios = require('axios');
 const aiService = require('../services/aiService');
@@ -128,7 +129,29 @@ router.post('/upload', auth, upload.single('file'), async (req, res) => {
 router.get('/', auth, async (req, res) => {
   try {
     const files = await File.find({ userId: req.user.id });
-    res.json(files);
+    
+    // Get share links count for each file
+    const fileIds = files.map(f => f._id);
+    const shareLinksAgg = await ShareLink.aggregate([
+      { $match: { fileId: { $in: fileIds }, isActive: true } },
+      { $group: { _id: '$fileId', count: { $sum: 1 } } }
+    ]);
+    
+    // Create a map of fileId -> shareLinks count
+    const shareLinksMap = {};
+    shareLinksAgg.forEach(item => {
+      shareLinksMap[item._id.toString()] = item.count;
+    });
+    
+    // Add shareLinks array (with count) to each file
+    const filesWithShareInfo = files.map(f => {
+      const fileObj = f.toObject();
+      const count = shareLinksMap[f._id.toString()] || 0;
+      fileObj.shareLinks = count > 0 ? new Array(count).fill({}) : [];
+      return fileObj;
+    });
+    
+    res.json(filesWithShareInfo);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
