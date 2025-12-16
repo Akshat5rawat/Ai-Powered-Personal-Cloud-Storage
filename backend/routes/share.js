@@ -155,6 +155,36 @@ router.get('/my-shares', auth, async (req, res) => {
   }
 });
 
+// Get share stats for analytics
+router.get('/stats', auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Count active share links
+    const totalShareLinks = await ShareLink.countDocuments({ userId, isActive: true });
+    
+    // Count files with at least one active share link
+    const filesWithShares = await ShareLink.distinct('fileId', { userId, isActive: true });
+    const totalSharedFiles = filesWithShares.length;
+    
+    // Total access count across all shares
+    const accessStats = await ShareLink.aggregate([
+      { $match: { userId: require('mongoose').Types.ObjectId.createFromHexString(userId), isActive: true } },
+      { $group: { _id: null, totalAccess: { $sum: '$accessCount' } } }
+    ]);
+    const totalAccessCount = accessStats[0]?.totalAccess || 0;
+
+    res.json({
+      totalShareLinks,
+      totalSharedFiles,
+      totalAccessCount
+    });
+  } catch (err) {
+    console.error('Get share stats error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Delete/revoke a share link
 router.delete('/:shareId', auth, async (req, res) => {
   try {

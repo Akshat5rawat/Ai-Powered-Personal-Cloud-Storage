@@ -6,6 +6,8 @@ export default function Header() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [loggedIn, setLoggedIn] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   useEffect(() => {
     const checkAuth = () => {
@@ -27,44 +29,196 @@ export default function Header() {
     return () => window.removeEventListener('storage', checkAuth);
   }, []);
 
+  const handleLogoutClick = () => {
+    setShowLogoutConfirm(true);
+  };
+
   const logout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('username');
     setLoggedIn(false);
     setUser(null);
+    setMobileMenuOpen(false);
+    setShowLogoutConfirm(false);
     navigate('/login');
   };
 
+  const cancelLogout = () => {
+    setShowLogoutConfirm(false);
+  };
+
   return (
-    <nav className="bg-white shadow p-4">
-      <div className="container mx-auto flex gap-4 items-center">
-        <Link to="/" className="font-bold text-lg">AI Cloud</Link>
-        {loggedIn && (
-          <>
-            <Link to="/upload" className="hover:text-blue-600">Upload</Link>
-            <Link to="/files" className="hover:text-blue-600">My Files</Link>
-            <Link to="/search" className="hover:text-blue-600">Search</Link>
-          </>
-        )}
-        <div className="ml-auto flex gap-3 items-center">
-          {loggedIn ? (
-            <>
-              {user && <span className="text-sm text-gray-600">Welcome, {user.username}</span>}
-              <button onClick={logout} className="text-sm text-red-600 hover:text-red-800 font-medium">
-                Logout
-              </button>
-            </>
-          ) : (
-            <>
-              <Link to="/login" className="text-sm text-blue-600 hover:text-blue-800 font-medium">
-                Login
-              </Link>
-              <Link to="/register" className="text-sm text-green-600 hover:text-green-800 font-medium">
-                Register
-              </Link>
-            </>
-          )}
+    <nav className="bg-white shadow-lg border-b border-gray-100 sticky top-0 z-50">
+      <div className="container mx-auto px-4 py-4">
+        <div className="flex justify-between items-center">
+          {/* Logo */}
+          <Link 
+            to="/" 
+            className="font-bold text-2xl bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent hover:from-purple-700 hover:to-pink-700 transition-all"
+          >
+            ☁️ AI Cloud
+          </Link>
+
+          {/* Desktop Navigation */}
+          <div className="hidden md:flex items-center gap-8">
+            {loggedIn && (
+              <div className="flex gap-6">
+                <Link 
+                  to="/upload" 
+                  className="text-gray-700 hover:text-purple-600 transition-colors font-medium relative group"
+                >
+                  Upload
+                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-gradient-to-r from-purple-600 to-pink-600 group-hover:w-full transition-all duration-300"></span>
+                </Link>
+                <Link 
+                  to="/files" 
+                  className="text-gray-700 hover:text-purple-600 transition-colors font-medium relative group"
+                >
+                  My Files
+                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-gradient-to-r from-purple-600 to-pink-600 group-hover:w-full transition-all duration-300"></span>
+                </Link>
+                <Link 
+                  to="/search" 
+                  className="text-gray-700 hover:text-purple-600 transition-colors font-medium relative group"
+                >
+                  Search
+                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-gradient-to-r from-purple-600 to-pink-600 group-hover:w-full transition-all duration-300"></span>
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {/* Desktop User Section */}
+          <div className="hidden md:flex gap-4 items-center">
+            {loggedIn ? (
+              <>
+                <div className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
+                  <span className="text-sm font-medium text-gray-700">👤 {user?.username}</span>
+                </div>
+                <button 
+                  onClick={handleLogoutClick} 
+                  className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <>
+                <Link 
+                  to="/login" 
+                  className="text-gray-700 px-4 py-2 rounded-lg font-medium hover:text-purple-600 transition-colors"
+                >
+                  Login
+                </Link>
+                <Link 
+                  to="/register" 
+                  className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-6 py-2 rounded-lg font-medium hover:shadow-lg transition-all duration-300"
+                >
+                  Register
+                </Link>
+              </>
+            )}
+          </div>
+
+          {/* Mobile Menu Button */}
+          <button 
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="md:hidden text-2xl text-gray-700 hover:text-purple-600 transition-colors"
+          >
+            {mobileMenuOpen ? '✕' : '☰'}
+          </button>
         </div>
+
+        {/* Logout Confirmation Modal */}
+        {showLogoutConfirm && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl animate-fadeIn">
+              <div className="text-center">
+                <div className="text-5xl mb-4">👋</div>
+                <h3 className="text-xl font-bold text-gray-800 mb-2">Leaving so soon?</h3>
+                <p className="text-gray-600 mb-6">Are you sure you want to logout?</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={cancelLogout}
+                    className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={logout}
+                    className="flex-1 px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg font-medium hover:shadow-lg transition-all"
+                  >
+                    Yes, Logout
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Menu */}
+        {mobileMenuOpen && (
+          <div className="md:hidden mt-4 pb-4 border-t border-gray-100 animate-slideDown">
+            {loggedIn && (
+              <div className="flex flex-col gap-3 mb-4">
+                <Link 
+                  to="/upload" 
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="text-gray-700 hover:text-purple-600 transition-colors font-medium py-2"
+                >
+                  Upload
+                </Link>
+                <Link 
+                  to="/files" 
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="text-gray-700 hover:text-purple-600 transition-colors font-medium py-2"
+                >
+                  My Files
+                </Link>
+                <Link 
+                  to="/search" 
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="text-gray-700 hover:text-purple-600 transition-colors font-medium py-2"
+                >
+                  Search
+                </Link>
+              </div>
+            )}
+            
+            <div className="border-t border-gray-100 pt-4 flex flex-col gap-2">
+              {loggedIn ? (
+                <>
+                  <div className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-lg mb-2">
+                    <span className="text-sm font-medium text-gray-700">👤 {user?.username}</span>
+                  </div>
+                  <button 
+                    onClick={handleLogoutClick} 
+                    className="w-full bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+                  >
+                    Logout
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link 
+                    to="/login" 
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="w-full text-center text-gray-700 px-4 py-2 rounded-lg font-medium hover:text-purple-600 transition-colors"
+                  >
+                    Login
+                  </Link>
+                  <Link 
+                    to="/register" 
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2 rounded-lg font-medium hover:shadow-lg transition-all duration-300 text-center"
+                  >
+                    Register
+                  </Link>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </nav>
   );
