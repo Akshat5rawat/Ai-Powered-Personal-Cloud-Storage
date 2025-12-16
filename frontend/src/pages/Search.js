@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import client from '../api';
 import { isAuthenticated } from '../utils/auth';
@@ -6,6 +6,10 @@ import { isAuthenticated } from '../utils/auth';
 export default function Search() {
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
+  const [thumbnails, setThumbnails] = useState({});
+  const [previewFile, setPreviewFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -21,6 +25,50 @@ export default function Search() {
     } catch (err) {
       alert('Search failed');
     }
+  };
+
+  const loadThumbnail = useCallback(async (fileId) => {
+    try {
+      const res = await client.get(`/files/download/${fileId}`);
+      if (res?.data?.url) {
+        setThumbnails(prev => ({ ...prev, [fileId]: res.data.url }));
+      }
+    } catch (err) {
+      // ignore thumbnail load errors
+    }
+  }, []);
+
+  useEffect(() => {
+    // load thumbnails for visible results
+    results.forEach(r => {
+      const file = r.file || r;
+      if (!file) return;
+      if ((file.mimetype || '').startsWith('image/') || (file.mimetype || '').startsWith('video/')) {
+        if (!thumbnails[file._id]) loadThumbnail(file._id);
+      }
+    });
+  }, [results, loadThumbnail, thumbnails]);
+
+  const openPreview = async (file) => {
+    setPreviewFile(file);
+    setPreviewLoading(true);
+    try {
+      const res = await client.get(`/files/download/${file._id}`);
+      if (res?.data?.url) {
+        setPreviewUrl(res.data.url);
+      }
+    } catch (err) {
+      console.error('Preview load failed', err);
+      setPreviewUrl(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const closePreview = () => {
+    setPreviewFile(null);
+    setPreviewUrl(null);
+    setPreviewLoading(false);
   };
 
   const doKeyword = async (e) => {
@@ -44,16 +92,58 @@ export default function Search() {
         </div>
       </form>
       <div className="grid gap-4">
-        {results.map(r => (
-          <div key={r.file._id} className="p-4 bg-white rounded shadow flex justify-between items-center">
-            <div>
-              <div className="font-bold">{r.file.filename}</div>
-              <div className="text-sm text-gray-500">Score: {r.score.toFixed(3)}</div>
+        {results.map(r => {
+          const file = r.file || r;
+          const thumb = thumbnails[file._id];
+          return (
+            <div key={file._id} className="p-4 bg-white rounded shadow flex justify-between items-center">
+              <div className="flex items-center gap-4">
+                {thumb ? (
+                  (file.mimetype || '').startsWith('image/') ? (
+                    <img src={thumb} alt={file.filename} className="w-16 h-16 object-cover rounded cursor-pointer" onClick={() => openPreview(file)} />
+                  ) : (
+                    <video src={thumb} className="w-16 h-16 object-cover rounded cursor-pointer" onClick={() => openPreview(file)} />
+                  )
+                ) : (
+                  <div className="w-16 h-16 bg-gray-100 rounded flex items-center justify-center text-2xl">📄</div>
+                )}
+                <div>
+                  <div className="font-bold cursor-pointer hover:text-blue-600" onClick={() => openPreview(file)}>{file.filename}</div>
+                  <div className="text-sm text-gray-500">Score: {(r.score || 0).toFixed(3)}</div>
+                </div>
+              </div>
+              <div className="text-sm text-gray-600">{file.category}</div>
             </div>
-            <div>Category: {r.file.category}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
+
+      {/* Preview Modal */}
+      {previewFile && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center" onClick={closePreview}>
+          <div className="bg-white rounded-lg max-w-3xl w-full p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold">{previewFile.filename}</h3>
+              <button onClick={closePreview} className="text-gray-600 hover:text-gray-900">Close</button>
+            </div>
+            <div className="min-h-[200px] flex items-center justify-center">
+              {previewLoading ? (
+                <div>Loading preview...</div>
+              ) : previewUrl ? (
+                (previewFile.mimetype || '').startsWith('image/') ? (
+                  <img src={previewUrl} alt={previewFile.filename} className="max-w-full max-h-[70vh] object-contain" />
+                ) : (previewFile.mimetype || '').startsWith('video/') ? (
+                  <video src={previewUrl} controls className="max-w-full max-h-[70vh]" />
+                ) : (
+                  <iframe src={previewUrl} className="w-full h-[60vh]" title={previewFile.filename} />
+                )
+              ) : (
+                <div className="text-gray-500">Preview not available</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
