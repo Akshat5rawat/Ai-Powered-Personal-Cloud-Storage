@@ -12,6 +12,8 @@ export default function Upload() {
   const [duplicateModal, setDuplicateModal] = useState(null);
   const [pendingUpload, setPendingUpload] = useState(null);
   const [savedDuplicates, setSavedDuplicates] = useState([]);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -164,6 +166,10 @@ export default function Upload() {
       setCompletedUploads([]);
       setSavedDuplicates([]);
       setUploading(false);
+
+      // Show upload completed popup
+      setToastMessage('All files uploaded successfully!');
+      setShowToast(true);
     }, 2000);
   };
 
@@ -188,6 +194,26 @@ export default function Upload() {
   return (
     <div className="max-w-2xl mx-auto">
       <div className="bg-white p-8 rounded-lg shadow-lg">
+        {/* Upload Complete Modal Popup */}
+        {showToast && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-8 max-w-md text-center shadow-2xl animate-bounce-in">
+              <div className="mb-4">
+                <svg className="h-16 w-16 text-green-500 mx-auto" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <h3 className="text-2xl font-bold text-gray-800 mb-2">Success!</h3>
+              <p className="text-gray-600 mb-6">{toastMessage}</p>
+              <button
+                onClick={() => setShowToast(false)}
+                className="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-6 rounded-lg transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
         <h2 className="text-3xl font-bold mb-6 text-center text-gray-800">Upload File</h2>
         
         <form onSubmit={handle} className="space-y-6">
@@ -238,8 +264,39 @@ export default function Upload() {
                 <p className="text-xs text-gray-500">
                   Any file type supported • Multiple files allowed
                 </p>
-              </div>
-            </label>
+                </div>
+                {/* Supported File Types */}
+                <div className="flex items-center justify-center gap-4 mt-2">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-lg">
+                    <svg className="w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <rect x="3" y="3" width="18" height="14" rx="2" ry="2" strokeWidth="1.5" />
+                      <circle cx="8" cy="8" r="1.5" fill="currentColor" />
+                    </svg>
+                    <span className="text-xs font-medium text-blue-700">Images</span>
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-2 bg-green-50 rounded-lg">
+                    <svg className="w-4 h-4 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path d="M7 7h10v10H7z" strokeWidth="1.5" />
+                      <path d="M9 9h6v6H9z" strokeWidth="1" />
+                    </svg>
+                    <span className="text-xs font-medium text-green-700">Documents</span>
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 rounded-lg">
+                    <svg className="w-4 h-4 text-purple-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <rect x="2" y="6" width="20" height="12" rx="2" ry="2" strokeWidth="1.5" />
+                      <path d="M8 10l3 2-3 2V10z" strokeWidth="1" />
+                    </svg>
+                    <span className="text-xs font-medium text-purple-700">Videos</span>
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-2 bg-pink-50 rounded-lg">
+                    <svg className="w-4 h-4 text-pink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path d="M12 3v18" strokeWidth="1.5" />
+                      <path d="M8 7a4 4 0 018 0v6a4 4 0 01-8 0V7z" strokeWidth="1" />
+                    </svg>
+                    <span className="text-xs font-medium text-pink-700">Audio</span>
+                  </div>
+                </div>
+              </label>
           </div>
 
           {/* Selected Files List */}
@@ -421,6 +478,42 @@ export default function Upload() {
                 <span>Save Duplicate</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Success Modal Popup */}
+      {showToast && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4 text-center shadow-2xl">
+            {/* Success Checkmark Icon */}
+            <div className="mb-4">
+              <svg
+                className="h-20 w-20 text-green-500 mx-auto"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </div>
+
+            {/* Success Message */}
+            <h3 className="text-2xl font-bold text-gray-800 mb-2">Upload Successful!</h3>
+            <p className="text-gray-600 mb-6">{toastMessage}</p>
+
+            {/* Close Button */}
+            <button
+              onClick={() => setShowToast(false)}
+              className="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-200"
+            >
+              Done
+            </button>
           </div>
         </div>
       )}
