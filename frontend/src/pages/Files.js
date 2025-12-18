@@ -99,6 +99,45 @@ export default function Files() {
       return <iframe src={previewUrl} className="w-full h-[70vh] bg-white" title={previewFile.filename} />;
     }
     
+    // Word document preview (.doc, .docx)
+    if (mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
+        mimetype === 'application/msword') {
+      const encodedUrl = encodeURIComponent(previewUrl);
+      return (
+        <iframe 
+          src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}`}
+          className="w-full h-[70vh]" 
+          title={previewFile.filename}
+        />
+      );
+    }
+    
+    // PowerPoint presentation preview (.ppt, .pptx)
+    if (mimetype === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || 
+        mimetype === 'application/vnd.ms-powerpoint') {
+      const encodedUrl = encodeURIComponent(previewUrl);
+      return (
+        <iframe 
+          src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}`}
+          className="w-full h-[70vh]" 
+          title={previewFile.filename}
+        />
+      );
+    }
+    
+    // Excel spreadsheet preview (.xls, .xlsx)
+    if (mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
+        mimetype === 'application/vnd.ms-excel') {
+      const encodedUrl = encodeURIComponent(previewUrl);
+      return (
+        <iframe 
+          src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodedUrl}`}
+          className="w-full h-[70vh]" 
+          title={previewFile.filename}
+        />
+      );
+    }
+    
     // Default: show link to open in new tab
     return (
       <div className="text-center p-8">
