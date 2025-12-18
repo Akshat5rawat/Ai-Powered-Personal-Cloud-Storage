@@ -204,6 +204,14 @@ export default function Files() {
     return new Date(date).toLocaleString();
   };
 
+  const formatUploadDate = (date) => {
+    if (!date) return '';
+    const d = new Date(date);
+    const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    return `${dateStr} • ${timeStr}`;
+  };
+
   const getCategoryFromMimetype = (mimetype) => {
     if (!mimetype) return 'Others';
     if (mimetype.startsWith('image/')) return 'Images';
@@ -316,12 +324,14 @@ export default function Files() {
       case 'extra-large':
         return (
           <div key={file._id} className="flex flex-col items-center p-4 bg-white rounded-lg hover:bg-gray-50">
-            {renderFileThumbnail(file, category, 'extra-large')}
+            <div className="relative">
+              {renderFileThumbnail(file, category, 'extra-large')}
+            </div>
             <div className="mt-2 text-center w-full">
               <p className="text-sm font-medium truncate cursor-pointer hover:text-blue-600" title={file.filename} onClick={() => preview(file._id)}>{file.filename}</p>
+              <p className="text-xs text-gray-500 mt-1">{formatUploadDate(file.createdAt)}</p>
               <div className="flex gap-2 mt-2 justify-center flex-wrap">
                 <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-2 py-1 text-xs rounded hover:bg-purple-600">Share</button>
-                <button onClick={() => preview(file._id)} className="bg-green-500 text-white px-2 py-1 text-xs rounded hover:bg-green-600">Preview</button>
                 <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-2 py-1 text-xs rounded hover:bg-blue-600">Download</button>
                 <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-2 py-1 text-xs rounded hover:bg-red-600">Delete</button>
               </div>
@@ -332,12 +342,14 @@ export default function Files() {
       case 'large':
         return (
           <div key={file._id} className="flex flex-col items-center p-3 bg-white rounded-lg hover:bg-gray-50">
-            {renderFileThumbnail(file, category, 'large')}
+            <div className="relative">
+              {renderFileThumbnail(file, category, 'large')}
+            </div>
             <div className="mt-2 text-center w-full">
               <p className="text-sm font-medium truncate cursor-pointer hover:text-blue-600" title={file.filename} onClick={() => preview(file._id)}>{file.filename}</p>
+              <p className="text-xs text-gray-500 mt-1">{formatUploadDate(file.createdAt)}</p>
               <div className="flex gap-1 mt-2 justify-center flex-wrap">
                 <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-2 py-1 text-xs rounded hover:bg-purple-600">Share</button>
-                <button onClick={() => preview(file._id)} className="bg-green-500 text-white px-2 py-1 text-xs rounded hover:bg-green-600">Preview</button>
                 <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-2 py-1 text-xs rounded hover:bg-blue-600">Download</button>
                 <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-2 py-1 text-xs rounded hover:bg-red-600">Delete</button>
               </div>
@@ -348,11 +360,13 @@ export default function Files() {
       case 'medium':
         return (
           <div key={file._id} className="flex flex-col items-center p-2 bg-white rounded-lg hover:bg-gray-50">
-            {renderFileThumbnail(file, category, 'medium')}
+            <div className="relative">
+              {renderFileThumbnail(file, category, 'medium')}
+            </div>
             <p className="text-xs mt-1 truncate w-full text-center cursor-pointer hover:text-blue-600" title={file.filename} onClick={() => preview(file._id)}>{file.filename}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{file.createdAt ? new Date(file.createdAt).toLocaleDateString() : ''}</p>
             <div className="flex gap-1 mt-1 flex-wrap justify-center">
               <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-1 py-0.5 text-xs rounded hover:bg-purple-600">Share</button>
-              <button onClick={() => preview(file._id)} className="bg-green-500 text-white px-1 py-0.5 text-xs rounded hover:bg-green-600">Preview</button>
               <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-1 py-0.5 text-xs rounded hover:bg-blue-600">Download</button>
               <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-1 py-0.5 text-xs rounded hover:bg-red-600">Delete</button>
             </div>
@@ -372,9 +386,9 @@ export default function Files() {
           <div key={file._id} className="flex items-center gap-3 p-2 bg-white hover:bg-gray-50 rounded">
             {renderFileThumbnail(file, category, 'list')}
             <span className="text-sm flex-1 truncate cursor-pointer hover:text-blue-600" onClick={() => preview(file._id)}>{file.filename}</span>
+            <span className="text-sm text-gray-600 font-medium whitespace-nowrap">{formatUploadDate(file.createdAt)}</span>
             <div className="flex gap-1">
               <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-2 py-1 text-xs rounded hover:bg-purple-600">Share</button>
-              <button onClick={() => preview(file._id)} className="bg-green-500 text-white px-2 py-1 text-xs rounded hover:bg-green-600">Preview</button>
               <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-2 py-1 text-xs rounded hover:bg-blue-600">Download</button>
               <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-2 py-1 text-xs rounded hover:bg-red-600">Delete</button>
             </div>
@@ -384,15 +398,15 @@ export default function Files() {
       case 'details':
         return (
           <div key={file._id} className="grid grid-cols-12 gap-4 p-3 bg-white hover:bg-gray-50 items-center border-b border-gray-200">
-            <div className="col-span-5 flex items-center gap-3">
+            <div className="col-span-4 flex items-center gap-3">
               {renderFileThumbnail(file, category, 'small')}
               <span className="text-sm truncate cursor-pointer hover:text-blue-600" onClick={() => preview(file._id)}>{file.filename}</span>
             </div>
-            <div className="col-span-2 text-sm text-gray-600">{file.category || 'uncategorized'}</div>
+            <div className="col-span-2 text-sm font-medium text-gray-700">{formatUploadDate(file.createdAt)}</div>
+            <div className="col-span-1 text-sm text-gray-600">{file.category || 'uncategorized'}</div>
             <div className="col-span-1 text-sm text-gray-600">{file.duplicate ? 'Yes' : 'No'}</div>
             <div className="col-span-4 flex gap-1 justify-end">
               <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-2 py-1 text-xs rounded hover:bg-purple-600">Share</button>
-              <button onClick={() => preview(file._id)} className="bg-green-500 text-white px-2 py-1 text-xs rounded hover:bg-green-600">Preview</button>
               <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-2 py-1 text-xs rounded hover:bg-blue-600">Download</button>
               <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-2 py-1 text-xs rounded hover:bg-red-600">Delete</button>
             </div>
@@ -404,17 +418,21 @@ export default function Files() {
         return (
           <div key={file._id} className="p-4 bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow flex justify-between items-center">
             <div className="flex items-center gap-4">
-              {renderFileThumbnail(file, category, 'medium')}
+              <div className="relative">
+                {renderFileThumbnail(file, category, 'medium')}
+              </div>
               <div>
                 <div className="font-semibold text-gray-800 cursor-pointer hover:text-blue-600" onClick={() => preview(file._id)}>{file.filename}</div>
                 <div className="text-sm text-gray-500">
                   {file.category || 'uncategorized'} {file.duplicate ? '(duplicate)' : ''}
                 </div>
+                <div className="text-sm text-gray-600 font-medium mt-1">
+                  {formatUploadDate(file.createdAt)}
+                </div>
               </div>
             </div>
             <div className="flex gap-2">
               <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-3 py-1 rounded hover:bg-purple-600">Share</button>
-              <button onClick={() => preview(file._id)} className="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600">Preview</button>
               <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600">Download</button>
               <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600">Delete</button>
             </div>
