@@ -28,28 +28,34 @@ router.post('/check-duplicate', auth, upload.single('file'), async (req, res) =>
     // Check for existing file with same hash for this user
     const existingByHash = await File.findOne({ hash, userId });
     if (existingByHash) {
+      const fullPath = existingByHash.path === '/' ? `/${existingByHash.filename}` : `${existingByHash.path}/${existingByHash.filename}`;
       return res.json({
         isDuplicate: true,
         duplicateOf: {
           id: existingByHash._id,
           filename: existingByHash.filename,
+          path: existingByHash.path,
+          fullPath: fullPath,
           createdAt: existingByHash.createdAt
         },
-        message: `"${originalname}" is a duplicate of "${existingByHash.filename}"`
+        message: `"${originalname}" is a duplicate of "${existingByHash.filename}" located at: ${fullPath}`
       });
     }
 
     // Check for existing file with same filename for this user
     const existingByName = await File.findOne({ filename: originalname, userId });
     if (existingByName) {
+      const fullPath = existingByName.path === '/' ? `/${existingByName.filename}` : `${existingByName.path}/${existingByName.filename}`;
       return res.json({
         isDuplicate: true,
         duplicateOf: {
           id: existingByName._id,
           filename: existingByName.filename,
+          path: existingByName.path,
+          fullPath: fullPath,
           createdAt: existingByName.createdAt
         },
-        message: `"${originalname}" already exists with the same name`
+        message: `"${originalname}" already exists at: ${fullPath}`
       });
     }
 
@@ -68,6 +74,7 @@ router.post('/upload', auth, upload.single('file'), async (req, res) => {
     const mimetype = req.file.mimetype;
     const size = req.file.size;
     const userId = req.user.id;
+    const path = req.body.path || '/'; // Get path from request body, default to root
     const key = `${userId}/${Date.now()}_${originalname}`;
 
     // compute SHA256 hash in backend (fallback)
@@ -83,7 +90,8 @@ router.post('/upload', auth, upload.single('file'), async (req, res) => {
       size,
       mimetype,
       minioKey: key,
-      hash
+      hash,
+      path: path
     });
     await fileRecord.save();
 
@@ -204,6 +212,143 @@ router.delete('/:id', auth, async (req, res) => {
     await File.deleteOne({ _id: fileRecord._id });
     res.json({ message: 'Deleted' });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create a folder
+router.post('/folders', auth, async (req, res) => {
+  try {
+    const { folderName, path = '/' } = req.body;
+    
+    if (!folderName) {
+      return res.status(400).json({ error: 'Folder name is required' });
+    }
+
+    // Validate folder name (no special characters except spaces, hyphens, underscores)
+    if (!/^[a-zA-Z0-9 _-]+$/.test(folderName)) {
+      return res.status(400).json({ error: 'Invalid folder name. Use only letters, numbers, spaces, hyphens, and underscores.' });
+    }
+
+    // Check if folder already exists at this path
+    const existingFolder = await File.findOne({
+      userId: req.user.id,
+      filename: folderName,
+      path: path,
+      isFolder: true
+    });
+
+    if (existingFolder) {
+      return res.status(400).json({ error: 'A folder with this name already exists in this location' });
+    }
+
+    // Create folder record (no MinIO object needed)
+    const folderRecord = new File({
+      userId: req.user.id,
+      filename: folderName,
+      path: path,
+      isFolder: true,
+      minioKey: `${req.user.id}/${path}/${folderName}/` // Virtual key for consistency
+    });
+
+    await folderRecord.save();
+    res.json({ message: 'Folder created', folder: folderRecord });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Move file to a folder
+router.put('/:id/move', auth, async (req, res) => {
+  try {
+    const { targetPath } = req.body; // e.g., '/', '/Documents', '/Photos/2024'
+    
+    if (targetPath === undefined) {
+      return res.status(400).json({ error: 'targetPath is required' });
+    }
+
+    const fileRecord = await File.findById(req.params.id);
+    if (!fileRecord) return res.status(404).json({ message: 'Not found' });
+    if (fileRecord.userId.toString() !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+
+    // Validate that target path exists if not root
+    if (targetPath !== '/') {
+      const pathParts = targetPath.split('/').filter(p => p);
+      let currentPath = '/';
+      
+      for (const part of pathParts) {
+        const folderExists = await File.findOne({
+          userId: req.user.id,
+          filename: part,
+          path: currentPath,
+          isFolder: true
+        });
+        
+        if (!folderExists) {
+          return res.status(400).json({ error: `Folder path does not exist: ${currentPath}${part}` });
+        }
+        
+        currentPath = currentPath === '/' ? `/${part}` : `${currentPath}/${part}`;
+      }
+    }
+
+    // Update file's path
+    fileRecord.path = targetPath;
+    await fileRecord.save();
+
+    res.json({ message: 'File moved successfully', file: fileRecord });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Rename file or folder
+router.put('/:id/rename', auth, async (req, res) => {
+  try {
+    const { newName } = req.body;
+    
+    if (!newName || !newName.trim()) {
+      return res.status(400).json({ error: 'New name is required' });
+    }
+
+    const fileRecord = await File.findById(req.params.id);
+    if (!fileRecord) return res.status(404).json({ message: 'Not found' });
+    if (fileRecord.userId.toString() !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+
+    // Validate new name
+    if (fileRecord.isFolder) {
+      // For folders: no special characters except spaces, hyphens, underscores
+      if (!/^[a-zA-Z0-9 _-]+$/.test(newName.trim())) {
+        return res.status(400).json({ error: 'Invalid folder name. Use only letters, numbers, spaces, hyphens, and underscores.' });
+      }
+    } else {
+      // For files: allow most characters but not path separators
+      if (/[/\\]/.test(newName)) {
+        return res.status(400).json({ error: 'File name cannot contain / or \\' });
+      }
+    }
+
+    // Check if a file/folder with the new name already exists in the same path
+    const existingFile = await File.findOne({
+      userId: req.user.id,
+      filename: newName.trim(),
+      path: fileRecord.path,
+      _id: { $ne: fileRecord._id }
+    });
+
+    if (existingFile) {
+      return res.status(400).json({ error: `A ${fileRecord.isFolder ? 'folder' : 'file'} with this name already exists in this location` });
+    }
+
+    // Update filename
+    fileRecord.filename = newName.trim();
+    await fileRecord.save();
+
+    res.json({ message: `${fileRecord.isFolder ? 'Folder' : 'File'} renamed successfully`, file: fileRecord });
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -12,6 +12,8 @@ const FileSchema = new mongoose.Schema({
   pHash: { type: String },
   duplicate: { type: Boolean, default: false },
   duplicateOf: { type: mongoose.Schema.Types.ObjectId, ref: 'File', default: null },
+  path: { type: String, default: '/' }, // folder path, e.g., '/', '/Documents', '/Photos/2024'
+  isFolder: { type: Boolean, default: false }, // true if this is a folder, not a file
   createdAt: { type: Date, default: Date.now }
 });
 

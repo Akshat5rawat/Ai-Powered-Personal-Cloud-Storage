@@ -20,6 +20,18 @@ export default function Files() {
   const [thumbnails, setThumbnails] = useState({});
   const [viewMode, setViewMode] = useState('tiles');
   const [showViewMenu, setShowViewMenu] = useState(false);
+  const [currentPath, setCurrentPath] = useState('/');
+  const [showNewFolderModal, setShowNewFolderModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [showMoveModal, setShowMoveModal] = useState(null);
+  const [moveTargetPath, setMoveTargetPath] = useState('/');
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(null);
+  const [pendingUpload, setPendingUpload] = useState(null);
+  const [notification, setNotification] = useState(null);
+  const [showRenameModal, setShowRenameModal] = useState(null);
+  const [newFileName, setNewFileName] = useState('');
   const navigate = useNavigate();
   
   useEffect(() => {
@@ -239,6 +251,200 @@ export default function Files() {
     }
   };
 
+  // Folder functionality
+  const createFolder = async () => {
+    if (!newFolderName.trim()) {
+      alert('Please enter a folder name');
+      return;
+    }
+
+    try {
+      await client.post('/files/folders', {
+        folderName: newFolderName.trim(),
+        path: currentPath
+      });
+      
+      // Refresh files list
+      const res = await client.get('/files');
+      setFiles(res.data);
+      
+      setShowNewFolderModal(false);
+      setNewFolderName('');
+    } catch (err) {
+      console.error('Create folder failed:', err);
+      alert(err.response?.data?.error || 'Failed to create folder. Please try again.');
+    }
+  };
+
+  const openFolder = (folder) => {
+    const newPath = currentPath === '/' ? `/${folder.filename}` : `${currentPath}/${folder.filename}`;
+    setCurrentPath(newPath);
+  };
+
+  const navigateToPath = (path) => {
+    setCurrentPath(path);
+  };
+
+  const moveFile = async (fileId) => {
+    try {
+      await client.put(`/files/${fileId}/move`, {
+        targetPath: moveTargetPath
+      });
+      
+      // Refresh files list
+      const res = await client.get('/files');
+      setFiles(res.data);
+      
+      setShowMoveModal(null);
+      setMoveTargetPath('/');
+    } catch (err) {
+      console.error('Move file failed:', err);
+      alert(err.response?.data?.error || 'Failed to move file. Please try again.');
+    }
+  };
+
+  // Rename functionality
+  const openRenameModal = (file) => {
+    setShowRenameModal(file);
+    setNewFileName(file.filename);
+  };
+
+  const renameFile = async () => {
+    if (!newFileName.trim()) {
+      alert('Please enter a new name');
+      return;
+    }
+
+    try {
+      await client.put(`/files/${showRenameModal._id}/rename`, {
+        newName: newFileName.trim()
+      });
+      
+      // Refresh files list
+      const res = await client.get('/files');
+      setFiles(res.data);
+      
+      showNotification(`${showRenameModal.isFolder ? 'Folder' : 'File'} renamed successfully!`, 'success');
+      setShowRenameModal(null);
+      setNewFileName('');
+    } catch (err) {
+      console.error('Rename failed:', err);
+      alert(err.response?.data?.error || 'Failed to rename. Please try again.');
+    }
+  };
+
+  const getAllFolders = () => {
+    return files.filter(f => f.isFolder);
+  };
+
+  const getCurrentItems = () => {
+    return files.filter(f => (f.path || '/') === currentPath);
+  };
+
+  const getPathParts = () => {
+    if (currentPath === '/') return [];
+    return currentPath.split('/').filter(p => p);
+  };
+
+  const buildPathFromParts = (parts) => {
+    if (parts.length === 0) return '/';
+    return '/' + parts.join('/');
+  };
+
+  // Show notification toast
+  const showNotification = (message, type = 'success') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 4000);
+  };
+
+  // Upload file functionality
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setUploading(true);
+    setUploadProgress(0);
+
+    try {
+      // Check for duplicates first
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const duplicateCheck = await client.post('/files/check-duplicate', formData);
+      
+      if (duplicateCheck.data.isDuplicate) {
+        // Show duplicate modal instead of alert
+        setPendingUpload({ file, event });
+        setShowDuplicateModal(duplicateCheck.data);
+        setUploading(false);
+        return;
+      }
+
+      // Upload the file with current path
+      await performUpload(file, event);
+    } catch (err) {
+      console.error('Upload failed:', err);
+      showNotification(err.response?.data?.error || 'Failed to upload file. Please try again.', 'error');
+      setUploading(false);
+      setUploadProgress(0);
+      event.target.value = ''; // Reset file input
+    }
+  };
+
+  // Perform the actual upload
+  const performUpload = async (file, event) => {
+    try {
+      setUploading(true);
+      const uploadFormData = new FormData();
+      uploadFormData.append('file', file);
+      uploadFormData.append('path', currentPath);
+
+      const uploadRes = await client.post('/files/upload', uploadFormData, {
+        onUploadProgress: (progressEvent) => {
+          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          setUploadProgress(progress);
+        }
+      });
+
+      // Refresh files list
+      const res = await client.get('/files');
+      setFiles(res.data);
+      
+      // Load thumbnail if it's an image or video
+      const uploadedFile = res.data.find(f => f._id === uploadRes.data.fileId);
+      if (uploadedFile && (uploadedFile.mimetype?.startsWith('image/') || uploadedFile.mimetype?.startsWith('video/'))) {
+        loadThumbnail(uploadedFile._id);
+      }
+
+      showNotification('File uploaded successfully!', 'success');
+    } catch (err) {
+      console.error('Upload failed:', err);
+      showNotification(err.response?.data?.error || 'Failed to upload file. Please try again.', 'error');
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+      if (event) event.target.value = ''; // Reset file input
+    }
+  };
+
+  // Handle duplicate upload confirmation
+  const handleDuplicateConfirm = async () => {
+    setShowDuplicateModal(null);
+    if (pendingUpload) {
+      await performUpload(pendingUpload.file, pendingUpload.event);
+      setPendingUpload(null);
+    }
+  };
+
+  // Handle duplicate upload cancel
+  const handleDuplicateCancel = () => {
+    setShowDuplicateModal(null);
+    if (pendingUpload?.event) {
+      pendingUpload.event.target.value = ''; // Reset file input
+    }
+    setPendingUpload(null);
+  };
+
   const formatExpiry = (date) => {
     return new Date(date).toLocaleString();
   };
@@ -294,6 +500,27 @@ export default function Files() {
   const categories = ['Images', 'Videos', 'Documents', 'Audio', 'Others'];
 
   const renderFileThumbnail = (file, category, size = 'medium') => {
+    // Handle folders
+    if (file.isFolder) {
+      const sizeClasses = {
+        'extra-large': 'w-32 h-32 text-6xl',
+        'large': 'w-24 h-24 text-5xl',
+        'medium': 'w-16 h-16 text-3xl',
+        'small': 'w-12 h-12 text-2xl',
+        'list': 'w-8 h-8 text-xl'
+      };
+      const sizeClass = sizeClasses[size] || sizeClasses.medium;
+      
+      return (
+        <div 
+          className={`${sizeClass} flex items-center justify-center cursor-pointer hover:opacity-80 transition-opacity`}
+          onClick={() => openFolder(file)}
+        >
+          <span>📁</span>
+        </div>
+      );
+    }
+
     const thumbnailUrl = thumbnails[file._id];
     const sizeClasses = {
       'extra-large': 'w-32 h-32',
@@ -359,6 +586,29 @@ export default function Files() {
   };
 
   const renderFileInView = (file, category) => {
+    // Handle folder rendering
+    if (file.isFolder) {
+      return (
+        <div key={file._id} className="p-4 bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow flex justify-between items-center cursor-pointer" onClick={() => openFolder(file)}>
+          <div className="flex items-center gap-4">
+            <div className="text-4xl">📁</div>
+            <div>
+              <div className="font-semibold text-gray-800">{file.filename}</div>
+              <div className="text-sm text-gray-500">Folder</div>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button 
+              onClick={(e) => { e.stopPropagation(); del(file._id); }} 
+              className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     switch (viewMode) {
       case 'extra-large':
         return (
@@ -370,6 +620,8 @@ export default function Files() {
               <p className="text-sm font-medium truncate cursor-pointer hover:text-blue-600" title={file.filename} onClick={() => preview(file._id)}>{file.filename}</p>
               <p className="text-xs text-gray-500 mt-1">{formatUploadDate(file.createdAt)}</p>
               <div className="flex gap-2 mt-2 justify-center flex-wrap">
+                <button onClick={() => openRenameModal(file)} className="bg-yellow-500 text-white px-2 py-1 text-xs rounded hover:bg-yellow-600">Rename</button>
+                <button onClick={() => setShowMoveModal(file)} className="bg-green-500 text-white px-2 py-1 text-xs rounded hover:bg-green-600">Move</button>
                 <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-2 py-1 text-xs rounded hover:bg-purple-600">Share</button>
                 <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-2 py-1 text-xs rounded hover:bg-blue-600">Download</button>
                 <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-2 py-1 text-xs rounded hover:bg-red-600">Delete</button>
@@ -388,6 +640,8 @@ export default function Files() {
               <p className="text-sm font-medium truncate cursor-pointer hover:text-blue-600" title={file.filename} onClick={() => preview(file._id)}>{file.filename}</p>
               <p className="text-xs text-gray-500 mt-1">{formatUploadDate(file.createdAt)}</p>
               <div className="flex gap-1 mt-2 justify-center flex-wrap">
+                <button onClick={() => openRenameModal(file)} className="bg-yellow-500 text-white px-2 py-1 text-xs rounded hover:bg-yellow-600">Rename</button>
+                <button onClick={() => setShowMoveModal(file)} className="bg-green-500 text-white px-2 py-1 text-xs rounded hover:bg-green-600">Move</button>
                 <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-2 py-1 text-xs rounded hover:bg-purple-600">Share</button>
                 <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-2 py-1 text-xs rounded hover:bg-blue-600">Download</button>
                 <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-2 py-1 text-xs rounded hover:bg-red-600">Delete</button>
@@ -405,6 +659,8 @@ export default function Files() {
             <p className="text-xs mt-1 truncate w-full text-center cursor-pointer hover:text-blue-600" title={file.filename} onClick={() => preview(file._id)}>{file.filename}</p>
             <p className="text-xs text-gray-500 mt-0.5">{file.createdAt ? new Date(file.createdAt).toLocaleDateString() : ''}</p>
             <div className="flex gap-1 mt-1 flex-wrap justify-center">
+              <button onClick={() => openRenameModal(file)} className="bg-yellow-500 text-white px-1 py-0.5 text-xs rounded hover:bg-yellow-600">Rename</button>
+              <button onClick={() => setShowMoveModal(file)} className="bg-green-500 text-white px-1 py-0.5 text-xs rounded hover:bg-green-600">Move</button>
               <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-1 py-0.5 text-xs rounded hover:bg-purple-600">Share</button>
               <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-1 py-0.5 text-xs rounded hover:bg-blue-600">Download</button>
               <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-1 py-0.5 text-xs rounded hover:bg-red-600">Delete</button>
@@ -427,6 +683,8 @@ export default function Files() {
             <span className="text-sm flex-1 truncate cursor-pointer hover:text-blue-600" onClick={() => preview(file._id)}>{file.filename}</span>
             <span className="text-sm text-gray-600 font-medium whitespace-nowrap">{formatUploadDate(file.createdAt)}</span>
             <div className="flex gap-1">
+              <button onClick={() => openRenameModal(file)} className="bg-yellow-500 text-white px-2 py-1 text-xs rounded hover:bg-yellow-600">Rename</button>
+              <button onClick={() => setShowMoveModal(file)} className="bg-green-500 text-white px-2 py-1 text-xs rounded hover:bg-green-600">Move</button>
               <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-2 py-1 text-xs rounded hover:bg-purple-600">Share</button>
               <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-2 py-1 text-xs rounded hover:bg-blue-600">Download</button>
               <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-2 py-1 text-xs rounded hover:bg-red-600">Delete</button>
@@ -445,6 +703,8 @@ export default function Files() {
             <div className="col-span-1 text-sm text-gray-600">{file.category || 'uncategorized'}</div>
             <div className="col-span-1 text-sm text-gray-600">{file.duplicate ? 'Yes' : 'No'}</div>
             <div className="col-span-4 flex gap-1 justify-end">
+              <button onClick={() => openRenameModal(file)} className="bg-yellow-500 text-white px-2 py-1 text-xs rounded hover:bg-yellow-600">Rename</button>
+              <button onClick={() => setShowMoveModal(file)} className="bg-green-500 text-white px-2 py-1 text-xs rounded hover:bg-green-600">Move</button>
               <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-2 py-1 text-xs rounded hover:bg-purple-600">Share</button>
               <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-2 py-1 text-xs rounded hover:bg-blue-600">Download</button>
               <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-2 py-1 text-xs rounded hover:bg-red-600">Delete</button>
@@ -471,6 +731,8 @@ export default function Files() {
               </div>
             </div>
             <div className="flex gap-2">
+              <button onClick={() => openRenameModal(file)} className="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600">Rename</button>
+              <button onClick={() => setShowMoveModal(file)} className="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600">Move</button>
               <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-3 py-1 rounded hover:bg-purple-600">Share</button>
               <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600">Download</button>
               <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600">Delete</button>
@@ -482,28 +744,63 @@ export default function Files() {
 
   return (
     <div>
+      {/* Header with Breadcrumb Navigation */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
           <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
           </svg>
-          <h2 className="text-2xl font-bold">My Files</h2>
+          <div>
+            <h2 className="text-2xl font-bold">My Files</h2>
+            {/* Breadcrumb Navigation */}
+            <div className="flex items-center gap-2 mt-1 text-sm text-gray-600">
+              <button 
+                onClick={() => navigateToPath('/')}
+                className="hover:text-blue-600 font-medium"
+              >
+                Home
+              </button>
+              {getPathParts().map((part, index) => (
+                <React.Fragment key={index}>
+                  <span>/</span>
+                  <button
+                    onClick={() => navigateToPath(buildPathFromParts(getPathParts().slice(0, index + 1)))}
+                    className="hover:text-blue-600 font-medium"
+                  >
+                    {part}
+                  </button>
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
         </div>
 
-        {/* View Mode Selector */}
-        <div className="relative">
+        {/* Action Buttons */}
+        <div className="flex gap-2">
           <button
-            onClick={() => setShowViewMenu(!showViewMenu)}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            onClick={() => setShowNewFolderModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            <span className="text-sm font-medium">View</span>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
+            <span className="font-medium">New Folder</span>
           </button>
+
+          {/* View Mode Selector */}
+          <div className="relative">
+            <button
+              onClick={() => setShowViewMenu(!showViewMenu)}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+              <span className="text-sm font-medium">View</span>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
 
           {showViewMenu && (
             <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
@@ -594,16 +891,27 @@ export default function Files() {
             </div>
           )}
         </div>
+        </div>
       </div>
       
-      {/* Category Folders */}
+      {/* Current Folder Content */}
       <div className="space-y-4">
-        {categories.map(category => {
-          const categoryFiles = filesByCategory[category] || [];
-          if (categoryFiles.length === 0) return null;
+        {(() => {
+          const currentItems = getCurrentItems();
+          const folders = currentItems.filter(item => item.isFolder);
+          const filesInFolder = currentItems.filter(item => !item.isFolder);
+          
+          // Group files by category
+          const filesByCategory = filesInFolder.reduce((acc, file) => {
+            const category = getCategoryFromMimetype(file.mimetype);
+            if (!acc[category]) {
+              acc[category] = [];
+            }
+            acc[category].push(file);
+            return acc;
+          }, {});
 
-          const isCollapsed = collapsedFolders[category];
-
+          const categories = ['Images', 'Videos', 'Documents', 'Audio', 'Others'];
           const gridClasses = {
             'extra-large': 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4',
             'large': 'grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3',
@@ -615,55 +923,88 @@ export default function Files() {
           };
 
           return (
-            <div key={category} className="bg-white rounded-lg shadow-md overflow-hidden">
-              {/* Folder Header */}
-              <button
-                onClick={() => toggleFolder(category)}
-                className="w-full px-6 py-4 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 transition-all duration-200"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-3xl">{getCategoryIcon(category)}</span>
-                  <div className="text-left">
-                    <h3 className="text-lg font-semibold text-gray-800">{category}</h3>
-                    <p className="text-sm text-gray-500">{categoryFiles.length} {categoryFiles.length === 1 ? 'file' : 'files'}</p>
-                  </div>
-                </div>
-                <svg
-                  className={`w-6 h-6 text-gray-600 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-
-              {/* Folder Content */}
-              {!isCollapsed && (
-                <div className="p-4 bg-gray-50">
-                  {viewMode === 'details' && (
-                    <div className="grid grid-cols-12 gap-4 p-3 bg-white font-semibold text-sm text-gray-700 border-b-2 border-gray-300 mb-2">
-                      <div className="col-span-5">Name</div>
-                      <div className="col-span-2">Category</div>
-                      <div className="col-span-1">Duplicate</div>
-                      <div className="col-span-4 text-right">Actions</div>
+            <>
+              {/* Show Folders First */}
+              {folders.length > 0 && (
+                <div className="bg-white rounded-lg shadow-md overflow-hidden mb-4">
+                  <div className="px-6 py-4 bg-gradient-to-r from-green-50 to-emerald-50">
+                    <div className="flex items-center gap-3">
+                      <span className="text-3xl">📁</span>
+                      <div className="text-left">
+                        <h3 className="text-lg font-semibold text-gray-800">Folders</h3>
+                        <p className="text-sm text-gray-500">{folders.length} {folders.length === 1 ? 'folder' : 'folders'}</p>
+                      </div>
                     </div>
-                  )}
-                  <div className={gridClasses[viewMode] || gridClasses.tiles}>
-                    {categoryFiles.map(f => renderFileInView(f, category))}
+                  </div>
+                  <div className="p-4 bg-gray-50">
+                    <div className={gridClasses[viewMode] || gridClasses.tiles}>
+                      {folders.map(f => renderFileInView(f, 'Folders'))}
+                    </div>
                   </div>
                 </div>
               )}
-            </div>
-          );
-        })}
 
-        {files.length === 0 && (
-          <div className="text-center py-12 text-gray-500">
-            <p className="text-lg">No files uploaded yet.</p>
-            <p className="text-sm mt-2">Upload some files to see them organized by category here!</p>
-          </div>
-        )}
+              {/* Show Files by Category */}
+              {categories.map(category => {
+                const categoryFiles = filesByCategory[category] || [];
+                if (categoryFiles.length === 0) return null;
+
+                const isCollapsed = collapsedFolders[category];
+
+                return (
+                  <div key={category} className="bg-white rounded-lg shadow-md overflow-hidden">
+                    {/* Folder Header */}
+                    <button
+                      onClick={() => toggleFolder(category)}
+                      className="w-full px-6 py-4 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 transition-all duration-200"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-3xl">{getCategoryIcon(category)}</span>
+                        <div className="text-left">
+                          <h3 className="text-lg font-semibold text-gray-800">{category}</h3>
+                          <p className="text-sm text-gray-500">{categoryFiles.length} {categoryFiles.length === 1 ? 'file' : 'files'}</p>
+                        </div>
+                      </div>
+                      <svg
+                        className={`w-6 h-6 text-gray-600 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+
+                    {/* Folder Content */}
+                    {!isCollapsed && (
+                      <div className="p-4 bg-gray-50">
+                        {viewMode === 'details' && (
+                          <div className="grid grid-cols-12 gap-4 p-3 bg-white font-semibold text-sm text-gray-700 border-b-2 border-gray-300 mb-2">
+                            <div className="col-span-4">Name</div>
+                            <div className="col-span-2">Date</div>
+                            <div className="col-span-1">Category</div>
+                            <div className="col-span-1">Duplicate</div>
+                            <div className="col-span-4 text-right">Actions</div>
+                          </div>
+                        )}
+                        <div className={gridClasses[viewMode] || gridClasses.tiles}>
+                          {categoryFiles.map(f => renderFileInView(f, category))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {currentItems.length === 0 && (
+                <div className="text-center py-12 text-gray-500">
+                  <p className="text-lg">No files or folders in this location.</p>
+                  <p className="text-sm mt-2">Upload some files or create folders to get started!</p>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* Preview Modal */}
@@ -857,6 +1198,310 @@ export default function Files() {
           </div>
         </div>
       )}
+
+      {/* New Folder Modal */}
+      {showNewFolderModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4" onClick={() => setShowNewFolderModal(false)}>
+          <div className="bg-white rounded-lg max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-4 border-b">
+              <h3 className="text-xl font-bold">Create New Folder</h3>
+              <button onClick={() => setShowNewFolderModal(false)} className="text-gray-500 hover:text-gray-700 text-2xl font-bold">&times;</button>
+            </div>
+            
+            <div className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Folder Name</label>
+                <input
+                  type="text"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && createFolder()}
+                  placeholder="Enter folder name"
+                  className="w-full border border-gray-300 rounded-lg p-2"
+                  autoFocus
+                />
+              </div>
+
+              <div className="mb-4 p-3 bg-gray-100 rounded">
+                <p className="text-sm text-gray-600">
+                  <strong>Location:</strong> {currentPath}
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={createFolder}
+                  className="flex-1 bg-green-500 hover:bg-green-600 text-white font-semibold py-2 rounded-lg transition-colors"
+                >
+                  Create Folder
+                </button>
+                <button
+                  onClick={() => setShowNewFolderModal(false)}
+                  className="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Move File Modal */}
+      {showMoveModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4" onClick={() => setShowMoveModal(null)}>
+          <div className="bg-white rounded-lg max-w-md w-full max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-4 border-b">
+              <h3 className="text-xl font-bold">Move File</h3>
+              <button onClick={() => setShowMoveModal(null)} className="text-gray-500 hover:text-gray-700 text-2xl font-bold">&times;</button>
+            </div>
+            
+            <div className="p-6">
+              <div className="mb-4 p-3 bg-gray-100 rounded">
+                <p className="text-sm font-medium text-gray-700">Moving: {showMoveModal.filename}</p>
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Select Destination Folder</label>
+                <select
+                  value={moveTargetPath}
+                  onChange={(e) => setMoveTargetPath(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg p-2"
+                >
+                  <option value="/">Root (Home)</option>
+                  {getAllFolders().map(folder => {
+                    const folderPath = folder.path === '/' ? `/${folder.filename}` : `${folder.path}/${folder.filename}`;
+                    return (
+                      <option key={folder._id} value={folderPath}>
+                        {folderPath}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => moveFile(showMoveModal._id)}
+                  className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 rounded-lg transition-colors"
+                >
+                  Move File
+                </button>
+                <button
+                  onClick={() => setShowMoveModal(null)}
+                  className="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Modal */}
+      {showRenameModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4" onClick={() => setShowRenameModal(null)}>
+          <div className="bg-white rounded-lg max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-4 border-b">
+              <h3 className="text-xl font-bold">Rename {showRenameModal.isFolder ? 'Folder' : 'File'}</h3>
+              <button onClick={() => setShowRenameModal(null)} className="text-gray-500 hover:text-gray-700 text-2xl font-bold">&times;</button>
+            </div>
+            
+            <div className="p-6">
+              <div className="mb-4 p-3 bg-gray-100 rounded">
+                <p className="text-sm font-medium text-gray-700">Current name: {showRenameModal.filename}</p>
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">New Name</label>
+                <input
+                  type="text"
+                  value={newFileName}
+                  onChange={(e) => setNewFileName(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && renameFile()}
+                  className="w-full border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter new name"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={renameFile}
+                  className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 rounded-lg transition-colors"
+                >
+                  Rename
+                </button>
+                <button
+                  onClick={() => setShowRenameModal(null)}
+                  className="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate Detection Modal */}
+      {showDuplicateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4" onClick={handleDuplicateCancel}>
+          <div className="bg-white rounded-lg max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-4 border-b bg-yellow-50">
+              <div className="flex items-center gap-3">
+                <svg className="w-8 h-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <h3 className="text-xl font-bold text-gray-800">Duplicate File Detected</h3>
+              </div>
+              <button onClick={handleDuplicateCancel} className="text-gray-500 hover:text-gray-700 text-2xl font-bold">&times;</button>
+            </div>
+            
+            <div className="p-6">
+              <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-gray-800 font-medium mb-2">{showDuplicateModal.message}</p>
+              </div>
+
+              {showDuplicateModal.duplicateOf && (
+                <div className="mb-6 p-4 bg-gray-50 rounded-lg space-y-2">
+                  <div className="flex items-start gap-2">
+                    <svg className="w-5 h-5 text-gray-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    <div className="flex-1">
+                      <p className="text-sm text-gray-600 mb-1"><strong>Existing file location:</strong></p>
+                      <p className="text-sm font-mono bg-white px-3 py-2 rounded border border-gray-200 text-blue-600 break-all">
+                        {showDuplicateModal.duplicateOf.fullPath || 
+                         (showDuplicateModal.duplicateOf.path === '/' 
+                           ? `/${showDuplicateModal.duplicateOf.filename}` 
+                           : `${showDuplicateModal.duplicateOf.path}/${showDuplicateModal.duplicateOf.filename}`)}
+                      </p>
+                    </div>
+                  </div>
+                  {showDuplicateModal.duplicateOf.createdAt && (
+                    <div className="flex items-center gap-2 text-sm text-gray-600 ml-7">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>Uploaded: {new Date(showDuplicateModal.duplicateOf.createdAt).toLocaleString()}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <p className="text-sm text-blue-800">
+                  <strong>Note:</strong> Uploading this file will create a separate copy in <span className="font-mono font-semibold">{currentPath}</span>
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleDuplicateConfirm}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                  </svg>
+                  Upload Anyway
+                </button>
+                <button
+                  onClick={handleDuplicateCancel}
+                  className="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-3 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Notification Toast */}
+      {notification && (
+        <div className="fixed top-20 right-8 z-50 animate-slide-in-right">
+          <div className={`rounded-lg shadow-lg p-4 max-w-md flex items-start gap-3 ${
+            notification.type === 'success' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
+          }`}>
+            {notification.type === 'success' ? (
+              <svg className="w-6 h-6 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            ) : (
+              <svg className="w-6 h-6 text-red-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            <div className="flex-1">
+              <p className={`font-medium ${
+                notification.type === 'success' ? 'text-green-800' : 'text-red-800'
+              }`}>
+                {notification.message}
+              </p>
+            </div>
+            <button
+              onClick={() => setNotification(null)}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Upload Button (FAB) */}
+      <div className="fixed bottom-8 right-8 z-40">
+        <input
+          type="file"
+          id="file-upload-fab"
+          onChange={handleFileUpload}
+          className="hidden"
+          disabled={uploading}
+        />
+        <label
+          htmlFor="file-upload-fab"
+          className={`flex items-center justify-center w-16 h-16 rounded-full shadow-lg cursor-pointer transition-all duration-300 ${
+            uploading 
+              ? 'bg-gray-400 cursor-not-allowed' 
+              : 'bg-blue-600 hover:bg-blue-700 hover:shadow-2xl hover:scale-110'
+          }`}
+          title={uploading ? 'Uploading...' : `Upload file to ${currentPath}`}
+        >
+          {uploading ? (
+            <svg className="w-8 h-8 text-white animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          ) : (
+            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+          )}
+        </label>
+        
+        {/* Upload Progress Indicator */}
+        {uploading && (
+          <div className="absolute -top-14 right-0 bg-white rounded-lg shadow-lg p-3 min-w-[200px]">
+            <div className="flex items-center gap-2 mb-2">
+              <svg className="w-4 h-4 text-blue-600 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+              </svg>
+              <span className="text-sm font-medium text-gray-700">Uploading...</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${uploadProgress}%` }}
+              ></div>
+            </div>
+            <p className="text-xs text-gray-500 mt-1 text-right">{uploadProgress}%</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
