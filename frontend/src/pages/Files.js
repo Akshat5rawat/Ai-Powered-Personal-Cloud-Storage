@@ -158,6 +158,11 @@ export default function Files() {
       const file = files.find(f => f._id === id);
       const filename = file ? file.filename : 'download';
       
+      // Trigger notification for download started
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: { message: `Downloading: "${filename}"` }
+      }));
+      
       // Fetch the file as a blob to enable proper download
       const response = await fetch(presignedUrl);
       const blob = await response.blob();
@@ -189,6 +194,11 @@ export default function Files() {
       try {
         await client.delete(`/files/${id}`);
         setFiles(files.filter(f => f._id !== id));
+        
+        // Trigger notification for file deleted
+        window.dispatchEvent(new CustomEvent('app-notification', {
+          detail: { message: `File deleted: "${filename}"` }
+        }));
       } catch (err) {
         console.error('Delete failed:', err);
         alert('Failed to delete file. Please try again.');
@@ -223,6 +233,11 @@ export default function Files() {
         maxAccess: shareSettings.maxAccess ? parseInt(shareSettings.maxAccess) : null
       });
       setShareLink(res.data.shareLink);
+      
+      // Trigger notification for share link created
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: { message: `Share link created for "${shareModal.filename}"` }
+      }));
     } catch (err) {
       console.error('Create share link failed:', err);
       alert('Failed to create share link. Please try again.');
@@ -234,6 +249,11 @@ export default function Files() {
       await navigator.clipboard.writeText(text);
       setCopying(true);
       setTimeout(() => setCopying(false), 2000);
+      
+      // Trigger notification for link copied
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: { message: 'Share link copied to clipboard!' }
+      }));
     } catch (err) {
       console.error('Copy failed:', err);
     }

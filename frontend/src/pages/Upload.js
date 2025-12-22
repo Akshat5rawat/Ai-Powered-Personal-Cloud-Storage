@@ -113,6 +113,11 @@ export default function Upload() {
       // User wants to skip/delete this duplicate
       progressMap[index] = -1; // Mark as skipped
       setUploadProgress({ ...progressMap });
+      
+      // Trigger notification for skipped duplicate
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: { message: `Duplicate skipped: "${file.name}"` }
+      }));
     }
     
     setDuplicateModal(null);
@@ -132,6 +137,11 @@ export default function Upload() {
         const duplicateCheck = await checkDuplicate(file);
         
         if (duplicateCheck.isDuplicate) {
+          // Trigger notification for duplicate detected
+          window.dispatchEvent(new CustomEvent('app-notification', {
+            detail: { message: `Duplicate detected: "${file.name}" already exists` }
+          }));
+          
           // Show modal and wait for user decision
           setDuplicateModal({
             filename: file.name,
@@ -161,6 +171,8 @@ export default function Upload() {
 
   const finishUpload = () => {
     setTimeout(() => {
+      const uploadedCount = completedUploads.length;
+      
       setFiles([]);
       setUploadProgress({});
       setCompletedUploads([]);
@@ -170,6 +182,15 @@ export default function Upload() {
       // Show upload completed popup
       setToastMessage('All files uploaded successfully!');
       setShowToast(true);
+
+      // Trigger notification for the Header
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: { 
+          message: uploadedCount > 1 
+            ? `${uploadedCount} files uploaded successfully!` 
+            : 'File uploaded successfully!' 
+        }
+      }));
     }, 2000);
   };
 

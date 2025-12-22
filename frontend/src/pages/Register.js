@@ -53,6 +53,12 @@ export default function Register() {
       const res = await client.post('/auth/register', form);
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('username', form.username);
+      
+      // Trigger notification for successful registration
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: { message: `Account created successfully! Welcome, ${form.username}!` }
+      }));
+      
       alert('Registered and logged in successfully');
       window.location.href = '/'; // Force reload to update Header state
     } catch (err) {

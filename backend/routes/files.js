@@ -208,4 +208,106 @@ router.delete('/:id', auth, async (req, res) => {
   }
 });
 
+// Get storage insights (duplicates, space saved, similar files)
+router.get('/storage-insights', auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    // Get all files for this user
+    const files = await File.find({ userId });
+    
+    // Find duplicate files (files that have the same hash)
+    const hashGroups = {};
+    files.forEach(file => {
+      if (file.hash) {
+        if (!hashGroups[file.hash]) {
+          hashGroups[file.hash] = [];
+        }
+        hashGroups[file.hash].push(file);
+      }
+    });
+    
+    // Calculate duplicates and space that could be saved
+    let duplicateCount = 0;
+    let potentialSpaceSaved = 0;
+    const duplicateGroups = [];
+    
+    Object.entries(hashGroups).forEach(([hash, groupFiles]) => {
+      if (groupFiles.length > 1) {
+        // All files except the first are duplicates
+        const duplicates = groupFiles.slice(1);
+        duplicateCount += duplicates.length;
+        
+        // Space saved = size of duplicate files
+        const spaceSaved = duplicates.reduce((sum, f) => sum + (f.size || 0), 0);
+        potentialSpaceSaved += spaceSaved;
+        
+        duplicateGroups.push({
+          original: {
+            id: groupFiles[0]._id,
+            filename: groupFiles[0].filename,
+            size: groupFiles[0].size,
+            createdAt: groupFiles[0].createdAt
+          },
+          duplicates: duplicates.map(f => ({
+            id: f._id,
+            filename: f.filename,
+            size: f.size,
+            createdAt: f.createdAt
+          })),
+          spaceSaved
+        });
+      }
+    });
+    
+    // Get files marked as duplicates in DB
+    const markedDuplicates = await File.find({ userId, duplicate: true }).populate('duplicateOf', 'filename');
+    
+    // Calculate total storage used
+    const totalStorage = files.reduce((sum, f) => sum + (f.size || 0), 0);
+    
+    // Find similar files by name (files with similar names)
+    const similarByName = [];
+    const processedPairs = new Set();
+    
+    files.forEach((file1, i) => {
+      files.forEach((file2, j) => {
+        if (i >= j) return; // Avoid duplicate pairs
+        
+        const pairKey = [file1._id.toString(), file2._id.toString()].sort().join('-');
+        if (processedPairs.has(pairKey)) return;
+        
+        const name1 = file1.filename.toLowerCase().replace(/\.[^/.]+$/, ''); // Remove extension
+        const name2 = file2.filename.toLowerCase().replace(/\.[^/.]+$/, '');
+        
+        // Check if names are similar (one contains the other, or start similarly)
+        if (name1.length > 3 && name2.length > 3) {
+          if (name1.includes(name2) || name2.includes(name1) || 
+              (name1.substring(0, 5) === name2.substring(0, 5) && file1.hash !== file2.hash)) {
+            similarByName.push({
+              file1: { id: file1._id, filename: file1.filename, size: file1.size },
+              file2: { id: file2._id, filename: file2.filename, size: file2.size },
+              reason: 'Similar filename'
+            });
+            processedPairs.add(pairKey);
+          }
+        }
+      });
+    });
+    
+    res.json({
+      totalFiles: files.length,
+      totalStorage,
+      duplicateCount,
+      potentialSpaceSaved,
+      duplicateGroups: duplicateGroups.slice(0, 10), // Limit to 10 groups
+      similarFiles: similarByName.slice(0, 10), // Limit to 10 pairs
+      markedDuplicates: markedDuplicates.length
+    });
+  } catch (err) {
+    console.error('Storage insights error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
