@@ -12,6 +12,12 @@ export default function Dashboard() {
   const [storageUsed, setStorageUsed] = useState(0);
   const [storageQuota] = useState(10 * 1024 * 1024 * 1024); // 10GB
   const [shareStats, setShareStats] = useState({ totalShareLinks: 0, totalSharedFiles: 0, totalAccessCount: 0 });
+  const [storageInsights, setStorageInsights] = useState({
+    duplicateCount: 0,
+    potentialSpaceSaved: 0,
+    duplicateGroups: [],
+    similarFiles: []
+  });
   const [analytics, setAnalytics] = useState({
     fileTypes: {},
     uploadsByDay: [],
@@ -32,6 +38,16 @@ export default function Dashboard() {
     }
   }, []);
 
+  // Fetch storage insights (duplicates, space saved, similar files)
+  const loadStorageInsights = useCallback(async () => {
+    try {
+      const res = await client.get('/files/storage-insights');
+      setStorageInsights(res.data);
+    } catch (err) {
+      console.error('Failed to load storage insights:', err);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isAuthenticated()) {
       navigate('/login');
@@ -39,11 +55,12 @@ export default function Dashboard() {
     }
     loadDashboardData();
     loadShareStats();
+    loadStorageInsights();
     
     // Auto-refresh share stats every 10 seconds for real-time updates
     const interval = setInterval(loadShareStats, 10000);
     return () => clearInterval(interval);
-  }, [navigate, loadShareStats]);
+  }, [navigate, loadShareStats, loadStorageInsights]);
 
   const loadDashboardData = async () => {
     try {
@@ -329,15 +346,35 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Storage Insights & Largest Files */}
+        {/* Storage Insights & Duplication */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Storage Insights */}
+          {/* Storage & Duplication Insights */}
           <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100">
             <h4 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-              <span>💾</span> Storage Insights
+              <span>🔍</span> Storage & Duplication Insights
             </h4>
             <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl">
+              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-red-50 to-orange-50 rounded-xl border border-red-100">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">📋</span>
+                  <div>
+                    <p className="font-medium text-gray-800">Duplicates Detected</p>
+                    <p className="text-sm text-gray-500">Files with identical content</p>
+                  </div>
+                </div>
+                <span className="text-xl font-bold text-red-600">{storageInsights.duplicateCount}</span>
+              </div>
+              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-100">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">💰</span>
+                  <div>
+                    <p className="font-medium text-gray-800">Storage Saved</p>
+                    <p className="text-sm text-gray-500">By removing duplicates</p>
+                  </div>
+                </div>
+                <span className="text-xl font-bold text-green-600">{formatBytes(storageInsights.potentialSpaceSaved)}</span>
+              </div>
+              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl border border-purple-100">
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">📊</span>
                   <div>
@@ -347,7 +384,96 @@ export default function Dashboard() {
                 </div>
                 <span className="text-xl font-bold text-purple-600">{formatBytes(stats.totalSize)}</span>
               </div>
-              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl">
+              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl border border-blue-100">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">🔗</span>
+                  <div>
+                    <p className="font-medium text-gray-800">Similar Files</p>
+                    <p className="text-sm text-gray-500">Files with similar names</p>
+                  </div>
+                </div>
+                <span className="text-xl font-bold text-blue-600">{storageInsights.similarFiles?.length || 0}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Duplicate Files List */}
+          <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100">
+            <h4 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <span>📋</span> Duplicate Groups
+            </h4>
+            <div className="space-y-3 max-h-80 overflow-y-auto">
+              {storageInsights.duplicateGroups?.length > 0 ? (
+                storageInsights.duplicateGroups.map((group, index) => (
+                  <div 
+                    key={index} 
+                    className="p-4 bg-gradient-to-r from-orange-50 to-red-50 rounded-xl border border-orange-200"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-gray-700">Original:</span>
+                      <span className="text-xs text-green-600 font-medium bg-green-100 px-2 py-0.5 rounded-full">
+                        {formatBytes(group.spaceSaved)} saveable
+                      </span>
+                    </div>
+                    <p className="font-medium text-gray-900 truncate text-sm mb-2">{group.original?.filename}</p>
+                    <div className="pl-3 border-l-2 border-orange-300">
+                      <p className="text-xs text-gray-500 mb-1">Duplicates ({group.duplicates?.length}):</p>
+                      {group.duplicates?.slice(0, 3).map((dup, i) => (
+                        <p key={i} className="text-sm text-gray-600 truncate">{dup.filename}</p>
+                      ))}
+                      {group.duplicates?.length > 3 && (
+                        <p className="text-xs text-gray-400">+{group.duplicates.length - 3} more</p>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8">
+                  <span className="text-4xl mb-2 block">✨</span>
+                  <p className="text-gray-500">No duplicates found!</p>
+                  <p className="text-sm text-gray-400">Your storage is optimized</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Similar Files */}
+        {storageInsights.similarFiles?.length > 0 && (
+          <div className="mt-8 bg-white rounded-2xl p-8 shadow-lg border border-gray-100">
+            <h4 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <span>🔗</span> Similar Files (By Name)
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {storageInsights.similarFiles.slice(0, 6).map((pair, index) => (
+                <div 
+                  key={index}
+                  className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                      {pair.reason}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-gray-700 truncate">📄 {pair.file1?.filename}</p>
+                    <p className="text-sm text-gray-700 truncate">📄 {pair.file2?.filename}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Storage Insights & Largest Files */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
+          {/* Storage Stats */}
+          <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100">
+            <h4 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <span>💾</span> Storage Stats
+            </h4>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl">
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">📈</span>
                   <div>
@@ -355,7 +481,7 @@ export default function Dashboard() {
                     <p className="text-sm text-gray-500">Per file average</p>
                   </div>
                 </div>
-                <span className="text-xl font-bold text-blue-600">{formatBytes(analytics.averageFileSize)}</span>
+                <span className="text-xl font-bold text-purple-600">{formatBytes(analytics.averageFileSize)}</span>
               </div>
               <div className="flex items-center justify-between p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl">
                 <div className="flex items-center gap-3">

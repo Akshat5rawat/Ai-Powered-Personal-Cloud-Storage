@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Bell } from 'lucide-react';
 import { isAuthenticated } from '../utils/auth';
 
 export default function Header() {
@@ -8,6 +9,43 @@ export default function Header() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState([
+    { id: 1, text: 'Welcome to AI Cloud! Start uploading your files.', time: 'Just now', unread: true },
+  ]);
+
+  const unreadCount = notifications.filter(n => n.unread).length;
+
+  const markAllRead = () => {
+    setNotifications(notifications.map(n => ({ ...n, unread: false })));
+  };
+
+  const clearAllNotifications = () => {
+    setNotifications([]);
+    setShowNotifications(false);
+  };
+
+  const addNotification = (text) => {
+    const newNotification = {
+      id: Date.now(),
+      text,
+      time: 'Just now',
+      unread: true
+    };
+    setNotifications(prev => [newNotification, ...prev]);
+  };
+
+  // Listen for custom notification events (file uploads, etc.)
+  useEffect(() => {
+    const handleNotification = (event) => {
+      if (event.detail && event.detail.message) {
+        addNotification(event.detail.message);
+      }
+    };
+    
+    window.addEventListener('app-notification', handleNotification);
+    return () => window.removeEventListener('app-notification', handleNotification);
+  }, []);
 
   useEffect(() => {
     const checkAuth = () => {
@@ -40,6 +78,10 @@ export default function Header() {
     setUser(null);
     setMobileMenuOpen(false);
     setShowLogoutConfirm(false);
+    
+    // Clear notifications on logout
+    setNotifications([]);
+    
     navigate('/login');
   };
 
@@ -101,6 +143,88 @@ export default function Header() {
                 >
                   Logout
                 </button>
+
+                {/* Notifications */}
+                <div className="relative ml-2">
+                  <button
+                    onClick={() => setShowNotifications(!showNotifications)}
+                    className="relative p-2.5 rounded-xl hover:bg-purple-50 transition-all duration-300 group"
+                  >
+                    <Bell className="w-5 h-5 text-gray-600 group-hover:text-purple-600 transition-colors" />
+                    {unreadCount > 0 && (
+                      <span className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                        {unreadCount}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Notifications Dropdown */}
+                  {showNotifications && (
+                    <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden">
+                      <div className="bg-gradient-to-r from-purple-600 to-purple-700 px-4 py-3 flex items-center justify-between">
+                        <h3 className="font-bold text-white">Notifications</h3>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={markAllRead}
+                            className="text-purple-100 hover:text-white text-xs"
+                          >
+                            Mark all read
+                          </button>
+                          <button 
+                            onClick={clearAllNotifications}
+                            className="text-purple-100 hover:text-white text-xs"
+                          >
+                            Clear all
+                          </button>
+                        </div>
+                      </div>
+                      <div className="max-h-96 overflow-y-auto">
+                        {notifications.length === 0 ? (
+                          <div className="px-4 py-8 text-center text-gray-500">
+                            <Bell className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+                            <p className="text-sm">No notifications yet</p>
+                          </div>
+                        ) : (
+                          notifications.map((notif) => (
+                            <div
+                              key={notif.id}
+                              className={`px-4 py-3 hover:bg-purple-50 cursor-pointer transition-colors border-b border-gray-100 ${
+                                notif.unread ? 'bg-purple-50/50' : ''
+                              }`}
+                              onClick={() => {
+                                setNotifications(notifications.map(n => 
+                                  n.id === notif.id ? { ...n, unread: false } : n
+                                ));
+                              }}
+                            >
+                              <div className="flex items-start gap-3">
+                                {notif.unread && (
+                                  <div className="w-2 h-2 bg-purple-600 rounded-full mt-2 flex-shrink-0" />
+                                )}
+                                <div className="flex-1">
+                                  <p className={`text-sm ${notif.unread ? 'font-semibold text-gray-800' : 'text-gray-600'}`}>
+                                    {notif.text}
+                                  </p>
+                                  <p className="text-xs text-gray-400 mt-1">{notif.time}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      {notifications.length > 0 && (
+                        <div className="px-4 py-3 bg-gray-50 text-center">
+                          <button 
+                            onClick={() => setShowNotifications(false)}
+                            className="text-sm text-purple-600 font-semibold hover:text-purple-700"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </>
             ) : (
               <>

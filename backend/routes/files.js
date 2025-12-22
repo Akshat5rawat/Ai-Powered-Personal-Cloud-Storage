@@ -28,34 +28,28 @@ router.post('/check-duplicate', auth, upload.single('file'), async (req, res) =>
     // Check for existing file with same hash for this user
     const existingByHash = await File.findOne({ hash, userId });
     if (existingByHash) {
-      const fullPath = existingByHash.path === '/' ? `/${existingByHash.filename}` : `${existingByHash.path}/${existingByHash.filename}`;
       return res.json({
         isDuplicate: true,
         duplicateOf: {
           id: existingByHash._id,
           filename: existingByHash.filename,
-          path: existingByHash.path,
-          fullPath: fullPath,
           createdAt: existingByHash.createdAt
         },
-        message: `"${originalname}" is a duplicate of "${existingByHash.filename}" located at: ${fullPath}`
+        message: `"${originalname}" is a duplicate of "${existingByHash.filename}"`
       });
     }
 
     // Check for existing file with same filename for this user
     const existingByName = await File.findOne({ filename: originalname, userId });
     if (existingByName) {
-      const fullPath = existingByName.path === '/' ? `/${existingByName.filename}` : `${existingByName.path}/${existingByName.filename}`;
       return res.json({
         isDuplicate: true,
         duplicateOf: {
           id: existingByName._id,
           filename: existingByName.filename,
-          path: existingByName.path,
-          fullPath: fullPath,
           createdAt: existingByName.createdAt
         },
-        message: `"${originalname}" already exists at: ${fullPath}`
+        message: `"${originalname}" already exists with the same name`
       });
     }
 
@@ -74,7 +68,6 @@ router.post('/upload', auth, upload.single('file'), async (req, res) => {
     const mimetype = req.file.mimetype;
     const size = req.file.size;
     const userId = req.user.id;
-    const path = req.body.path || '/'; // Get path from request body, default to root
     const key = `${userId}/${Date.now()}_${originalname}`;
 
     // compute SHA256 hash in backend (fallback)
@@ -90,8 +83,7 @@ router.post('/upload', auth, upload.single('file'), async (req, res) => {
       size,
       mimetype,
       minioKey: key,
-      hash,
-      path: path
+      hash
     });
     await fileRecord.save();
 
@@ -216,139 +208,104 @@ router.delete('/:id', auth, async (req, res) => {
   }
 });
 
-// Create a folder
-router.post('/folders', auth, async (req, res) => {
+// Get storage insights (duplicates, space saved, similar files)
+router.get('/storage-insights', auth, async (req, res) => {
   try {
-    const { folderName, path = '/' } = req.body;
+    const userId = req.user.id;
     
-    if (!folderName) {
-      return res.status(400).json({ error: 'Folder name is required' });
-    }
-
-    // Validate folder name (no special characters except spaces, hyphens, underscores)
-    if (!/^[a-zA-Z0-9 _-]+$/.test(folderName)) {
-      return res.status(400).json({ error: 'Invalid folder name. Use only letters, numbers, spaces, hyphens, and underscores.' });
-    }
-
-    // Check if folder already exists at this path
-    const existingFolder = await File.findOne({
-      userId: req.user.id,
-      filename: folderName,
-      path: path,
-      isFolder: true
-    });
-
-    if (existingFolder) {
-      return res.status(400).json({ error: 'A folder with this name already exists in this location' });
-    }
-
-    // Create folder record (no MinIO object needed)
-    const folderRecord = new File({
-      userId: req.user.id,
-      filename: folderName,
-      path: path,
-      isFolder: true,
-      minioKey: `${req.user.id}/${path}/${folderName}/` // Virtual key for consistency
-    });
-
-    await folderRecord.save();
-    res.json({ message: 'Folder created', folder: folderRecord });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Move file to a folder
-router.put('/:id/move', auth, async (req, res) => {
-  try {
-    const { targetPath } = req.body; // e.g., '/', '/Documents', '/Photos/2024'
+    // Get all files for this user
+    const files = await File.find({ userId });
     
-    if (targetPath === undefined) {
-      return res.status(400).json({ error: 'targetPath is required' });
-    }
-
-    const fileRecord = await File.findById(req.params.id);
-    if (!fileRecord) return res.status(404).json({ message: 'Not found' });
-    if (fileRecord.userId.toString() !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
-
-    // Validate that target path exists if not root
-    if (targetPath !== '/') {
-      const pathParts = targetPath.split('/').filter(p => p);
-      let currentPath = '/';
-      
-      for (const part of pathParts) {
-        const folderExists = await File.findOne({
-          userId: req.user.id,
-          filename: part,
-          path: currentPath,
-          isFolder: true
-        });
-        
-        if (!folderExists) {
-          return res.status(400).json({ error: `Folder path does not exist: ${currentPath}${part}` });
+    // Find duplicate files (files that have the same hash)
+    const hashGroups = {};
+    files.forEach(file => {
+      if (file.hash) {
+        if (!hashGroups[file.hash]) {
+          hashGroups[file.hash] = [];
         }
-        
-        currentPath = currentPath === '/' ? `/${part}` : `${currentPath}/${part}`;
+        hashGroups[file.hash].push(file);
       }
-    }
-
-    // Update file's path
-    fileRecord.path = targetPath;
-    await fileRecord.save();
-
-    res.json({ message: 'File moved successfully', file: fileRecord });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Rename file or folder
-router.put('/:id/rename', auth, async (req, res) => {
-  try {
-    const { newName } = req.body;
-    
-    if (!newName || !newName.trim()) {
-      return res.status(400).json({ error: 'New name is required' });
-    }
-
-    const fileRecord = await File.findById(req.params.id);
-    if (!fileRecord) return res.status(404).json({ message: 'Not found' });
-    if (fileRecord.userId.toString() !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
-
-    // Validate new name
-    if (fileRecord.isFolder) {
-      // For folders: no special characters except spaces, hyphens, underscores
-      if (!/^[a-zA-Z0-9 _-]+$/.test(newName.trim())) {
-        return res.status(400).json({ error: 'Invalid folder name. Use only letters, numbers, spaces, hyphens, and underscores.' });
-      }
-    } else {
-      // For files: allow most characters but not path separators
-      if (/[/\\]/.test(newName)) {
-        return res.status(400).json({ error: 'File name cannot contain / or \\' });
-      }
-    }
-
-    // Check if a file/folder with the new name already exists in the same path
-    const existingFile = await File.findOne({
-      userId: req.user.id,
-      filename: newName.trim(),
-      path: fileRecord.path,
-      _id: { $ne: fileRecord._id }
     });
-
-    if (existingFile) {
-      return res.status(400).json({ error: `A ${fileRecord.isFolder ? 'folder' : 'file'} with this name already exists in this location` });
-    }
-
-    // Update filename
-    fileRecord.filename = newName.trim();
-    await fileRecord.save();
-
-    res.json({ message: `${fileRecord.isFolder ? 'Folder' : 'File'} renamed successfully`, file: fileRecord });
+    
+    // Calculate duplicates and space that could be saved
+    let duplicateCount = 0;
+    let potentialSpaceSaved = 0;
+    const duplicateGroups = [];
+    
+    Object.entries(hashGroups).forEach(([hash, groupFiles]) => {
+      if (groupFiles.length > 1) {
+        // All files except the first are duplicates
+        const duplicates = groupFiles.slice(1);
+        duplicateCount += duplicates.length;
+        
+        // Space saved = size of duplicate files
+        const spaceSaved = duplicates.reduce((sum, f) => sum + (f.size || 0), 0);
+        potentialSpaceSaved += spaceSaved;
+        
+        duplicateGroups.push({
+          original: {
+            id: groupFiles[0]._id,
+            filename: groupFiles[0].filename,
+            size: groupFiles[0].size,
+            createdAt: groupFiles[0].createdAt
+          },
+          duplicates: duplicates.map(f => ({
+            id: f._id,
+            filename: f.filename,
+            size: f.size,
+            createdAt: f.createdAt
+          })),
+          spaceSaved
+        });
+      }
+    });
+    
+    // Get files marked as duplicates in DB
+    const markedDuplicates = await File.find({ userId, duplicate: true }).populate('duplicateOf', 'filename');
+    
+    // Calculate total storage used
+    const totalStorage = files.reduce((sum, f) => sum + (f.size || 0), 0);
+    
+    // Find similar files by name (files with similar names)
+    const similarByName = [];
+    const processedPairs = new Set();
+    
+    files.forEach((file1, i) => {
+      files.forEach((file2, j) => {
+        if (i >= j) return; // Avoid duplicate pairs
+        
+        const pairKey = [file1._id.toString(), file2._id.toString()].sort().join('-');
+        if (processedPairs.has(pairKey)) return;
+        
+        const name1 = file1.filename.toLowerCase().replace(/\.[^/.]+$/, ''); // Remove extension
+        const name2 = file2.filename.toLowerCase().replace(/\.[^/.]+$/, '');
+        
+        // Check if names are similar (one contains the other, or start similarly)
+        if (name1.length > 3 && name2.length > 3) {
+          if (name1.includes(name2) || name2.includes(name1) || 
+              (name1.substring(0, 5) === name2.substring(0, 5) && file1.hash !== file2.hash)) {
+            similarByName.push({
+              file1: { id: file1._id, filename: file1.filename, size: file1.size },
+              file2: { id: file2._id, filename: file2.filename, size: file2.size },
+              reason: 'Similar filename'
+            });
+            processedPairs.add(pairKey);
+          }
+        }
+      });
+    });
+    
+    res.json({
+      totalFiles: files.length,
+      totalStorage,
+      duplicateCount,
+      potentialSpaceSaved,
+      duplicateGroups: duplicateGroups.slice(0, 10), // Limit to 10 groups
+      similarFiles: similarByName.slice(0, 10), // Limit to 10 pairs
+      markedDuplicates: markedDuplicates.length
+    });
   } catch (err) {
-    console.error(err);
+    console.error('Storage insights error:', err);
     res.status(500).json({ error: err.message });
   }
 });

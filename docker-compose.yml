@@ -35,9 +35,9 @@ services:
       - backend
     ports:
       - 3000:3000
-    # volumes:
-    #   - ./frontend:/app
-    #   - /app/node_modules
+    volumes:
+      - ./frontend:/app:cached
+      - /app/node_modules
 
   ai-service:
     build: ./ai-service
