@@ -12,6 +12,12 @@ export default function Login() {
       const res = await client.post('/auth/login', form);
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('username', res.data.username);
+      
+      // Trigger notification for successful login
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: { message: `Welcome back, ${res.data.username}!` }
+      }));
+      
       alert('Logged in successfully');
       window.location.href = '/'; // Force reload to update Header state
     } catch (err) {
