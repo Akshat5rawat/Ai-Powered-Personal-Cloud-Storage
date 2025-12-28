@@ -1,5 +1,5 @@
 import axios from 'axios';
-const DEFAULT_PROD_API = 'https://ai-powered-personal-cloud-storage.onrender.com/'; 
+const DEFAULT_PROD_API = process.env.REACT_APP_BACKEND_URL; 
 // Automatically detect the current host and use it for API calls
 const getApiUrl = () => {
   // Get the current window location
