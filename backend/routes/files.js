@@ -10,6 +10,7 @@ const ShareLink = require('../models/ShareLink');
 const storageService = require('../services/supabaseService');
 const axios = require('axios');
 const aiService = require('../services/aiService');
+const summaryQueue = require('../services/summaryQueueService');
 const { sha256 } = require('../utils/crypto');
 
 const router = express.Router();
@@ -87,40 +88,253 @@ router.post('/upload', auth, upload.single('file'), async (req, res) => {
     });
     await fileRecord.save();
 
-    // send to AI microservice via service
-    try {
-      const aiData = await aiService.processFile(fileRecord._id.toString(), key, mimetype);
-      if (aiData.category) fileRecord.category = aiData.category;
-      if (aiData.embedding) fileRecord.embedding = aiData.embedding;
-      if (aiData.hash) fileRecord.hash = aiData.hash;
-      if (aiData.pHash) fileRecord.pHash = aiData.pHash;
-
-      // duplicate detection: check sha and pHash
-      if (aiData.hash) {
-        const existing = await File.findOne({ hash: aiData.hash, _id: { $ne: fileRecord._id } });
-        if (existing) {
-          fileRecord.duplicate = true;
-          fileRecord.duplicateOf = existing._id;
-        }
-      }
-
-      // For performance: if duplicate found via sha, skip pHash
-      if (!fileRecord.duplicate && aiData.pHash) {
-        const existing2 = await File.findOne({ pHash: aiData.pHash, _id: { $ne: fileRecord._id } });
-        if (existing2) {
-          fileRecord.duplicate = true;
-          fileRecord.duplicateOf = existing2._id;
-        }
-      }
-
-      await fileRecord.save();
-    } catch (err) {
-      console.error('AI service error', err.message);
-    }
-
+    // Return immediately - AI processing happens in background
     res.json({ message: 'Uploaded', fileId: fileRecord._id });
+
+    // Process AI features in background (non-blocking)
+    setImmediate(async () => {
+      try {
+        const aiData = await aiService.processFile(fileRecord._id.toString(), key, mimetype);
+        if (aiData.category) fileRecord.category = aiData.category;
+        if (aiData.embedding) fileRecord.embedding = aiData.embedding;
+        if (aiData.hash) fileRecord.hash = aiData.hash;
+        if (aiData.pHash) fileRecord.pHash = aiData.pHash;
+
+        // duplicate detection: check sha and pHash
+        if (aiData.hash) {
+          const existing = await File.findOne({ hash: aiData.hash, _id: { $ne: fileRecord._id } });
+          if (existing) {
+            fileRecord.duplicate = true;
+            fileRecord.duplicateOf = existing._id;
+          }
+        }
+
+        // For performance: if duplicate found via sha, skip pHash
+        if (!fileRecord.duplicate && aiData.pHash) {
+          const existing2 = await File.findOne({ pHash: aiData.pHash, _id: { $ne: fileRecord._id } });
+          if (existing2) {
+            fileRecord.duplicate = true;
+            fileRecord.duplicateOf = existing2._id;
+          }
+        }
+
+        await fileRecord.save();
+
+        // Trigger async summarization for new uploads
+        if (aiService.isSummarizable(mimetype)) {
+          fileRecord.summaryStatus = 'pending';
+          await fileRecord.save();
+          summaryQueue.enqueue(
+            fileRecord._id.toString(),
+            fileRecord.minioKey,
+            mimetype,
+            5 // High priority for new uploads
+          );
+        }
+        
+        console.log(`[Upload] AI processing complete for ${originalname}`);
+      } catch (err) {
+        console.error('AI service error', err.message);
+      }
+    });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== SUMMARY ENDPOINTS ====================
+
+/**
+ * GET /files/:id/summary
+ * 
+ * Lazy Summarization Endpoint:
+ * - If summary exists → return instantly
+ * - If summary missing → trigger background job and return pending status
+ * - If processing → return processing status
+ */
+router.get('/:id/summary', auth, async (req, res) => {
+  try {
+    const fileRecord = await File.findById(req.params.id);
+    
+    if (!fileRecord) {
+      return res.status(404).json({ message: 'File not found' });
+    }
+    
+    // Check ownership
+    if (fileRecord.userId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    // Check if file type is summarizable
+    if (!aiService.isSummarizable(fileRecord.mimetype)) {
+      return res.json({
+        fileId: fileRecord._id,
+        status: 'unsupported',
+        message: `File type ${fileRecord.mimetype} is not supported for summarization`
+      });
+    }
+
+    // Case 1: Summary already exists and completed
+    if (fileRecord.summaryStatus === 'completed' && fileRecord.summary) {
+      return res.json({
+        fileId: fileRecord._id,
+        status: 'completed',
+        summary: fileRecord.summary,
+        generatedAt: fileRecord.summaryGeneratedAt
+      });
+    }
+
+    // Case 2: Summary is currently being generated
+    if (fileRecord.summaryStatus === 'pending' || fileRecord.summaryStatus === 'processing') {
+      return res.json({
+        fileId: fileRecord._id,
+        status: fileRecord.summaryStatus,
+        message: 'Summary is being generated. Please check back shortly.'
+      });
+    }
+
+    // Case 3: Summary failed previously - allow retry
+    if (fileRecord.summaryStatus === 'failed') {
+      // Re-trigger summarization
+      await File.updateOne(
+        { _id: fileRecord._id },
+        { $set: { summaryStatus: 'pending', summaryError: null } }
+      );
+
+      summaryQueue.enqueue(
+        fileRecord._id.toString(),
+        fileRecord.minioKey,
+        fileRecord.mimetype,
+        5 // High priority for user-requested summaries
+      );
+
+      return res.json({
+        fileId: fileRecord._id,
+        status: 'pending',
+        message: 'Summary generation has been restarted. Please check back shortly.',
+        previousError: fileRecord.summaryError
+      });
+    }
+
+    // Case 4: No summary exists - trigger lazy summarization
+    await File.updateOne(
+      { _id: fileRecord._id },
+      { $set: { summaryStatus: 'pending' } }
+    );
+
+    summaryQueue.enqueue(
+      fileRecord._id.toString(),
+      fileRecord.minioKey,
+      fileRecord.mimetype,
+      5 // High priority for user-requested summaries
+    );
+
+    return res.json({
+      fileId: fileRecord._id,
+      status: 'pending',
+      message: 'Summary is being generated. Please check back shortly.'
+    });
+
+  } catch (err) {
+    console.error('Summary endpoint error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /files/:id/summary/regenerate
+ * 
+ * Force regenerate a summary (useful if content changed or for retry)
+ */
+router.post('/:id/summary/regenerate', auth, async (req, res) => {
+  try {
+    const fileRecord = await File.findById(req.params.id);
+    
+    if (!fileRecord) {
+      return res.status(404).json({ message: 'File not found' });
+    }
+    
+    if (fileRecord.userId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    if (!aiService.isSummarizable(fileRecord.mimetype)) {
+      return res.status(400).json({
+        message: `File type ${fileRecord.mimetype} is not supported for summarization`
+      });
+    }
+
+    // Reset summary status and queue for regeneration
+    await File.updateOne(
+      { _id: fileRecord._id },
+      { 
+        $set: { 
+          summary: null,
+          summaryStatus: 'pending',
+          summaryError: null,
+          summaryGeneratedAt: null
+        } 
+      }
+    );
+
+    summaryQueue.enqueue(
+      fileRecord._id.toString(),
+      fileRecord.minioKey,
+      fileRecord.mimetype,
+      3 // Very high priority for regeneration requests
+    );
+
+    res.json({
+      fileId: fileRecord._id,
+      status: 'pending',
+      message: 'Summary regeneration has been queued.'
+    });
+
+  } catch (err) {
+    console.error('Summary regenerate error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /files/summary/queue-status
+ * 
+ * Get the current status of the summary processing queue (admin/debug)
+ */
+router.get('/summary/queue-status', auth, async (req, res) => {
+  try {
+    const queueStatus = summaryQueue.getStatus();
+    
+    // Get database statistics
+    const stats = await File.aggregate([
+      {
+        $group: {
+          _id: '$summaryStatus',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const statsMap = {};
+    stats.forEach(s => {
+      statsMap[s._id || 'no_status'] = s.count;
+    });
+
+    res.json({
+      queue: queueStatus,
+      database: {
+        completed: statsMap.completed || 0,
+        pending: statsMap.pending || 0,
+        processing: statsMap.processing || 0,
+        failed: statsMap.failed || 0,
+        unsupported: statsMap.unsupported || 0,
+        noStatus: statsMap.no_status || 0
+      }
+    });
+
+  } catch (err) {
+    console.error('Queue status error:', err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -20,6 +20,11 @@ export default function Files() {
   const [thumbnails, setThumbnails] = useState({});
   const [viewMode, setViewMode] = useState('tiles');
   const [showViewMenu, setShowViewMenu] = useState(false);
+  // Summary modal state
+  const [summaryModal, setSummaryModal] = useState(null);
+  const [summaryData, setSummaryData] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState(null);
   const navigate = useNavigate();
   
   useEffect(() => {
@@ -263,6 +268,80 @@ export default function Files() {
     return new Date(date).toLocaleString();
   };
 
+  // Summary functionality
+  const isSummarizable = (mimetype) => {
+    if (!mimetype) return false;
+    const summarizable = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/plain',
+      'text/markdown',
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/gif',
+      'image/webp',
+      'image/bmp'
+    ];
+    return summarizable.some(s => mimetype.toLowerCase().includes(s));
+  };
+
+  const openSummaryModal = async (file) => {
+    setSummaryModal(file);
+    setSummaryData(null);
+    setSummaryError(null);
+    setSummaryLoading(true);
+
+    try {
+      // First check if summary already exists
+      const res = await client.get(`/ai/summary/${file._id}`);
+      if (res.data.summary && res.data.summaryStatus === 'completed') {
+        setSummaryData(res.data);
+        setSummaryLoading(false);
+      } else {
+        // Generate new summary
+        await generateSummary(file._id);
+      }
+    } catch (err) {
+      console.error('Failed to get summary:', err);
+      setSummaryError('Failed to load summary. Please try again.');
+      setSummaryLoading(false);
+    }
+  };
+
+  const generateSummary = async (fileId) => {
+    setSummaryLoading(true);
+    setSummaryError(null);
+
+    try {
+      const res = await client.post(`/ai/summarize/${fileId}`);
+      setSummaryData(res.data);
+      
+      // Update file in state with new summary info
+      setFiles(prevFiles => prevFiles.map(f => 
+        f._id === fileId 
+          ? { ...f, summary: res.data.summary, summaryStatus: res.data.status }
+          : f
+      ));
+      
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: { message: `Summary generated for "${summaryModal?.filename || 'file'}"` }
+      }));
+    } catch (err) {
+      console.error('Failed to generate summary:', err);
+      setSummaryError(err.response?.data?.message || err.response?.data?.error || 'Failed to generate summary. Please try again.');
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
+  const closeSummaryModal = () => {
+    setSummaryModal(null);
+    setSummaryData(null);
+    setSummaryError(null);
+  };
+
   const formatUploadDate = (date) => {
     if (!date) return '';
     const d = new Date(date);
@@ -390,6 +469,9 @@ export default function Files() {
               <p className="text-sm font-medium truncate cursor-pointer hover:text-blue-600" title={file.filename} onClick={() => preview(file._id)}>{file.filename}</p>
               <p className="text-xs text-gray-500 mt-1">{formatUploadDate(file.createdAt)}</p>
               <div className="flex gap-2 mt-2 justify-center flex-wrap">
+                {isSummarizable(file.mimetype) && (
+                  <button onClick={() => openSummaryModal(file)} className="bg-emerald-500 text-white px-2 py-1 text-xs rounded hover:bg-emerald-600" title="View AI Summary">📋</button>
+                )}
                 <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-2 py-1 text-xs rounded hover:bg-purple-600">Share</button>
                 <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-2 py-1 text-xs rounded hover:bg-blue-600">Download</button>
                 <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-2 py-1 text-xs rounded hover:bg-red-600">Delete</button>
@@ -408,6 +490,9 @@ export default function Files() {
               <p className="text-sm font-medium truncate cursor-pointer hover:text-blue-600" title={file.filename} onClick={() => preview(file._id)}>{file.filename}</p>
               <p className="text-xs text-gray-500 mt-1">{formatUploadDate(file.createdAt)}</p>
               <div className="flex gap-1 mt-2 justify-center flex-wrap">
+                {isSummarizable(file.mimetype) && (
+                  <button onClick={() => openSummaryModal(file)} className="bg-emerald-500 text-white px-2 py-1 text-xs rounded hover:bg-emerald-600" title="View AI Summary">📋</button>
+                )}
                 <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-2 py-1 text-xs rounded hover:bg-purple-600">Share</button>
                 <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-2 py-1 text-xs rounded hover:bg-blue-600">Download</button>
                 <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-2 py-1 text-xs rounded hover:bg-red-600">Delete</button>
@@ -425,6 +510,9 @@ export default function Files() {
             <p className="text-xs mt-1 truncate w-full text-center cursor-pointer hover:text-blue-600" title={file.filename} onClick={() => preview(file._id)}>{file.filename}</p>
             <p className="text-xs text-gray-500 mt-0.5">{file.createdAt ? new Date(file.createdAt).toLocaleDateString() : ''}</p>
             <div className="flex gap-1 mt-1 flex-wrap justify-center">
+              {isSummarizable(file.mimetype) && (
+                <button onClick={() => openSummaryModal(file)} className="bg-emerald-500 text-white px-1 py-0.5 text-xs rounded hover:bg-emerald-600" title="View AI Summary">📋</button>
+              )}
               <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-1 py-0.5 text-xs rounded hover:bg-purple-600">Share</button>
               <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-1 py-0.5 text-xs rounded hover:bg-blue-600">Download</button>
               <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-1 py-0.5 text-xs rounded hover:bg-red-600">Delete</button>
@@ -447,6 +535,9 @@ export default function Files() {
             <span className="text-sm flex-1 truncate cursor-pointer hover:text-blue-600" onClick={() => preview(file._id)}>{file.filename}</span>
             <span className="text-sm text-gray-600 font-medium whitespace-nowrap">{formatUploadDate(file.createdAt)}</span>
             <div className="flex gap-1">
+              {isSummarizable(file.mimetype) && (
+                <button onClick={() => openSummaryModal(file)} className="bg-emerald-500 text-white px-2 py-1 text-xs rounded hover:bg-emerald-600" title="View AI Summary">📋</button>
+              )}
               <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-2 py-1 text-xs rounded hover:bg-purple-600">Share</button>
               <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-2 py-1 text-xs rounded hover:bg-blue-600">Download</button>
               <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-2 py-1 text-xs rounded hover:bg-red-600">Delete</button>
@@ -465,6 +556,9 @@ export default function Files() {
             <div className="col-span-1 text-sm text-gray-600">{file.category || 'uncategorized'}</div>
             <div className="col-span-1 text-sm text-gray-600">{file.duplicate ? 'Yes' : 'No'}</div>
             <div className="col-span-4 flex gap-1 justify-end">
+              {isSummarizable(file.mimetype) && (
+                <button onClick={() => openSummaryModal(file)} className="bg-emerald-500 text-white px-2 py-1 text-xs rounded hover:bg-emerald-600" title="View AI Summary">📋</button>
+              )}
               <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-2 py-1 text-xs rounded hover:bg-purple-600">Share</button>
               <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-2 py-1 text-xs rounded hover:bg-blue-600">Download</button>
               <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-2 py-1 text-xs rounded hover:bg-red-600">Delete</button>
@@ -491,6 +585,11 @@ export default function Files() {
               </div>
             </div>
             <div className="flex gap-2">
+              {isSummarizable(file.mimetype) && (
+                <button onClick={() => openSummaryModal(file)} className="bg-emerald-500 text-white px-3 py-1 rounded hover:bg-emerald-600" title="View AI Summary">
+                  {file.summaryStatus === 'completed' ? '📋 Summary' : '🤖 Summarize'}
+                </button>
+              )}
               <button onClick={() => openShareModal(file)} className="bg-purple-500 text-white px-3 py-1 rounded hover:bg-purple-600">Share</button>
               <button onClick={() => download(file._id)} className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600">Download</button>
               <button onClick={(e) => { e.stopPropagation(); del(file._id); }} className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600">Delete</button>
@@ -873,6 +972,129 @@ export default function Files() {
 
             <div className="p-4 border-t flex justify-end">
               <button onClick={closeShareModal} className="bg-gray-500 text-white px-4 py-2 rounded">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Summary Modal */}
+      {summaryModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4" onClick={closeSummaryModal}>
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-4 border-b bg-gradient-to-r from-emerald-50 to-teal-50">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">🤖</span>
+                <h3 className="text-xl font-bold text-gray-800">AI Summary</h3>
+              </div>
+              <button onClick={closeSummaryModal} className="text-gray-500 hover:text-gray-700 text-2xl font-bold">&times;</button>
+            </div>
+            
+            <div className="p-6">
+              {/* File Info */}
+              <div className="mb-4 p-3 bg-gray-100 rounded-lg flex items-center gap-3">
+                <span className="text-2xl">{getCategoryIcon(getCategoryFromMimetype(summaryModal.mimetype))}</span>
+                <div>
+                  <p className="font-medium text-gray-700">{summaryModal.filename}</p>
+                  <p className="text-sm text-gray-500">{summaryModal.mimetype}</p>
+                </div>
+              </div>
+
+              {/* Loading State */}
+              {summaryLoading && (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-4 border-emerald-500 border-t-transparent mb-4"></div>
+                  <p className="text-gray-600 font-medium">Generating AI Summary...</p>
+                  <p className="text-sm text-gray-400 mt-2">This may take a few moments for large files</p>
+                </div>
+              )}
+
+              {/* Error State */}
+              {summaryError && !summaryLoading && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                  <div className="flex items-center gap-2 text-red-700 mb-2">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="font-medium">Error</span>
+                  </div>
+                  <p className="text-red-600 text-sm">{summaryError}</p>
+                  <button
+                    onClick={() => generateSummary(summaryModal._id)}
+                    className="mt-3 bg-red-100 hover:bg-red-200 text-red-700 px-4 py-2 rounded text-sm font-medium transition-colors"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              )}
+
+              {/* Summary Content */}
+              {summaryData && !summaryLoading && (
+                <div className="space-y-4">
+                  {/* Summary Status Badge */}
+                  <div className="flex items-center gap-2">
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                      summaryData.status === 'completed' || summaryData.status === 'already_summarized'
+                        ? 'bg-green-100 text-green-700' 
+                        : summaryData.status === 'unsupported'
+                        ? 'bg-yellow-100 text-yellow-700'
+                        : 'bg-gray-100 text-gray-700'
+                    }`}>
+                      {summaryData.status === 'completed' ? '✓ Generated' : 
+                       summaryData.status === 'already_summarized' ? '✓ Cached' :
+                       summaryData.status === 'unsupported' ? '⚠ Unsupported' : 
+                       summaryData.status}
+                    </span>
+                    {summaryData.generatedAt && (
+                      <span className="text-xs text-gray-400">
+                        Generated: {new Date(summaryData.generatedAt).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Summary Text */}
+                  <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-lg p-5 border border-emerald-100">
+                    <h4 className="text-sm font-semibold text-emerald-800 mb-3 flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      Summary
+                    </h4>
+                    <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">
+                      {summaryData.summary || summaryData.message || 'No summary available.'}
+                    </p>
+                  </div>
+
+                  {/* Regenerate Button */}
+                  {(summaryData.status === 'completed' || summaryData.status === 'already_summarized') && (
+                    <button
+                      onClick={() => generateSummary(summaryModal._id)}
+                      className="w-full bg-emerald-100 hover:bg-emerald-200 text-emerald-700 font-medium py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      Regenerate Summary
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t flex justify-end gap-2">
+              {summaryData?.summary && (
+                <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText(summaryData.summary);
+                    window.dispatchEvent(new CustomEvent('app-notification', {
+                      detail: { message: `Summary copied to clipboard for "${summaryModal?.filename || 'file'}"` }
+                    }));
+                  }}
+                  className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded transition-colors"
+                >
+                  Copy Summary
+                </button>
+              )}
+              <button onClick={closeSummaryModal} className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded transition-colors">Close</button>
             </div>
           </div>
         </div>

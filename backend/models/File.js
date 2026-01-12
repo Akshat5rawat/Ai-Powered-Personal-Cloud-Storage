@@ -12,6 +12,15 @@ const FileSchema = new mongoose.Schema({
   pHash: { type: String },
   duplicate: { type: Boolean, default: false },
   duplicateOf: { type: mongoose.Schema.Types.ObjectId, ref: 'File', default: null },
+  // AI Summary fields
+  summary: { type: String, default: null },
+  summaryGeneratedAt: { type: Date, default: null },
+  summaryStatus: { 
+    type: String, 
+    enum: [null, 'pending', 'processing', 'completed', 'failed', 'unsupported'],
+    default: null 
+  },
+  summaryError: { type: String, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 

@@ -16,3 +16,9 @@ cryptography
 pymongo
 python-dotenv
 supabase
+# Document summarization dependencies
+pdfplumber
+pytesseract
+python-docx
+# Image captioning
+accelerate

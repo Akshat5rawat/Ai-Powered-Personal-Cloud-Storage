@@ -17,10 +17,31 @@ const getApiUrl = () => {
 const API_URL = getApiUrl();
 
 const client = axios.create({ baseURL: API_URL });
+
+// Add auth token to all requests
 client.interceptors.request.use(config => {
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
+
+// Handle 401/403 responses by clearing invalid token and redirecting to login
+client.interceptors.response.use(
+  response => response,
+  error => {
+    if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+      // Token is invalid or expired - clear it and redirect to login
+      localStorage.removeItem('token');
+      localStorage.removeItem('username');
+      
+      // Only redirect if not already on login/register page
+      const currentPath = window.location.pathname;
+      if (currentPath !== '/login' && currentPath !== '/register') {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 export default client;

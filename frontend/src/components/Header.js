@@ -25,12 +25,13 @@ export default function Header() {
     setShowNotifications(false);
   };
 
-  const addNotification = (text) => {
+  const addNotification = (text, type = 'info') => {
     const newNotification = {
       id: Date.now(),
       text,
       time: 'Just now',
-      unread: true
+      unread: true,
+      type // 'success', 'error', 'warning', 'info'
     };
     setNotifications(prev => [newNotification, ...prev]);
   };
@@ -39,7 +40,7 @@ export default function Header() {
   useEffect(() => {
     const handleNotification = (event) => {
       if (event.detail && event.detail.message) {
-        addNotification(event.detail.message);
+        addNotification(event.detail.message, event.detail.type || 'info');
       }
     };
     
@@ -199,10 +200,20 @@ export default function Header() {
                             >
                               <div className="flex items-start gap-3">
                                 {notif.unread && (
-                                  <div className="w-2 h-2 bg-purple-600 rounded-full mt-2 flex-shrink-0" />
+                                  <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${
+                                    notif.type === 'error' ? 'bg-red-500' :
+                                    notif.type === 'warning' ? 'bg-yellow-500' :
+                                    notif.type === 'success' ? 'bg-green-500' : 'bg-purple-600'
+                                  }`} />
                                 )}
                                 <div className="flex-1">
-                                  <p className={`text-sm ${notif.unread ? 'font-semibold text-gray-800' : 'text-gray-600'}`}>
+                                  <p className={`text-sm ${
+                                    notif.unread ? 'font-semibold' : ''
+                                  } ${
+                                    notif.type === 'error' ? 'text-red-600' :
+                                    notif.type === 'warning' ? 'text-yellow-700' :
+                                    notif.unread ? 'text-gray-800' : 'text-gray-600'
+                                  }`}>
                                     {notif.text}
                                   </p>
                                   <p className="text-xs text-gray-400 mt-1">{notif.time}</p>

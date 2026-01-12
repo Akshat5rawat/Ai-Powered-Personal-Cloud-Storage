@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "start": "nodemon index.js",
-    "start:prod": "node index.js"
+    "start:prod": "node index.js",
+    "backfill": "node jobs/summaryBackfill.js",
+    "backfill:continuous": "node jobs/summaryBackfill.js --continuous",
+    "backfill:batch": "node jobs/summaryBackfill.js --batch=10"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.87.0",

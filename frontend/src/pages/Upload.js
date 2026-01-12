@@ -14,6 +14,7 @@ export default function Upload() {
   const [savedDuplicates, setSavedDuplicates] = useState([]);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState('success'); // 'success', 'error', 'warning'
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -81,19 +82,34 @@ export default function Upload() {
     const form = new FormData();
     form.append('file', file);
     
-    await client.post('/files/upload', form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: (progressEvent) => {
-        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-        progressMap[index] = percentCompleted;
+    try {
+      const response = await client.post('/files/upload', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          progressMap[index] = percentCompleted;
+          setUploadProgress({ ...progressMap });
+        }
+      });
+      
+      if (response.data && response.data.fileId) {
+        setCompletedUploads(prev => [...prev, index]);
+        progressMap[index] = 100;
         setUploadProgress({ ...progressMap });
+        return { success: true, filename: file.name };
+      } else {
+        throw new Error('Upload failed - no file ID returned');
       }
-    });
-    
-    setCompletedUploads(prev => [...prev, index]);
-    progressMap[index] = 100;
-    setUploadProgress({ ...progressMap });
+    } catch (err) {
+      progressMap[index] = -2; // Mark as failed
+      setUploadProgress({ ...progressMap });
+      const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Upload failed';
+      throw new Error(errorMessage);
+    }
   };
+
+  // Track failed uploads
+  const [failedUploads, setFailedUploads] = useState([]);
 
   // Handle user decision on duplicate
   const handleDuplicateDecision = async (keepDuplicate) => {
@@ -107,7 +123,11 @@ export default function Upload() {
         await uploadFile(file, index, progressMap);
         setSavedDuplicates(prev => [...prev, index]); // Track as saved duplicate
       } catch (err) {
-        alert(`Failed to upload ${file.name}: ${err.response?.data?.message || err.message}`);
+        setFailedUploads(prev => [...prev, { filename: file.name, error: err.message }]);
+        // Show error notification
+        window.dispatchEvent(new CustomEvent('app-notification', {
+          detail: { message: `Failed to upload "${file.name}": ${err.message}`, type: 'error' }
+        }));
       }
     } else {
       // User wants to skip/delete this duplicate
@@ -161,7 +181,11 @@ export default function Upload() {
         await uploadFile(file, index, progressMap);
         
       } catch (err) {
-        alert(`Failed to upload ${file.name}: ${err.response?.data?.message || err.message}`);
+        setFailedUploads(prev => [...prev, { filename: file.name, error: err.message }]);
+        // Show error notification for this file
+        window.dispatchEvent(new CustomEvent('app-notification', {
+          detail: { message: `Failed to upload "${file.name}": ${err.message}`, type: 'error' }
+        }));
       }
     }
     
@@ -172,24 +196,49 @@ export default function Upload() {
   const finishUpload = () => {
     setTimeout(() => {
       const uploadedCount = completedUploads.length;
+      const failedCount = failedUploads.length;
+      
+      // Determine the appropriate message and type
+      let message = '';
+      let toastType = 'success';
+      
+      if (uploadedCount === 0 && failedCount > 0) {
+        // All uploads failed
+        message = failedCount === 1 
+          ? `Upload failed: ${failedUploads[0].error}`
+          : `All ${failedCount} uploads failed`;
+        toastType = 'error';
+      } else if (uploadedCount > 0 && failedCount > 0) {
+        // Some succeeded, some failed
+        message = `${uploadedCount} file(s) uploaded, ${failedCount} failed`;
+        toastType = 'warning';
+      } else if (uploadedCount > 0) {
+        // All succeeded
+        message = uploadedCount > 1 
+          ? `${uploadedCount} files uploaded successfully!`
+          : 'File uploaded successfully!';
+        toastType = 'success';
+      } else {
+        // No files processed
+        message = 'No files were uploaded';
+        toastType = 'warning';
+      }
       
       setFiles([]);
       setUploadProgress({});
       setCompletedUploads([]);
       setSavedDuplicates([]);
+      setFailedUploads([]);
       setUploading(false);
 
       // Show upload completed popup
-      setToastMessage('All files uploaded successfully!');
+      setToastMessage(message);
+      setToastType(toastType);
       setShowToast(true);
 
       // Trigger notification for the Header
       window.dispatchEvent(new CustomEvent('app-notification', {
-        detail: { 
-          message: uploadedCount > 1 
-            ? `${uploadedCount} files uploaded successfully!` 
-            : 'File uploaded successfully!' 
-        }
+        detail: { message, type: toastType }
       }));
     }, 2000);
   };
@@ -220,15 +269,35 @@ export default function Upload() {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg p-8 max-w-md text-center shadow-2xl animate-bounce-in">
               <div className="mb-4">
-                <svg className="h-16 w-16 text-green-500 mx-auto" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
+                {toastType === 'success' && (
+                  <svg className="h-16 w-16 text-green-500 mx-auto" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                )}
+                {toastType === 'error' && (
+                  <svg className="h-16 w-16 text-red-500 mx-auto" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                )}
+                {toastType === 'warning' && (
+                  <svg className="h-16 w-16 text-yellow-500 mx-auto" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                )}
               </div>
-              <h3 className="text-2xl font-bold text-gray-800 mb-2">Success!</h3>
+              <h3 className={`text-2xl font-bold mb-2 ${
+                toastType === 'success' ? 'text-green-600' : 
+                toastType === 'error' ? 'text-red-600' : 'text-yellow-600'
+              }`}>
+                {toastType === 'success' ? 'Success!' : toastType === 'error' ? 'Upload Failed!' : 'Warning'}
+              </h3>
               <p className="text-gray-600 mb-6">{toastMessage}</p>
               <button
                 onClick={() => setShowToast(false)}
-                className="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-6 rounded-lg transition-colors"
+                className={`font-semibold py-2 px-6 rounded-lg transition-colors text-white ${
+                  toastType === 'success' ? 'bg-green-500 hover:bg-green-600' : 
+                  toastType === 'error' ? 'bg-red-500 hover:bg-red-600' : 'bg-yellow-500 hover:bg-yellow-600'
+                }`}
               >
                 Close
               </button>
