@@ -12,6 +12,7 @@ from supabase import create_client, Client
 from pymongo import MongoClient
 from bson import ObjectId
 import math
+import re
 
 # helper to convert hex string to imagehash object
 try:
@@ -20,8 +21,6 @@ except Exception:
     def hex_to_hash(s):
         return None
 
-from sentence_transformers import SentenceTransformer
-from transformers import CLIPProcessor, CLIPModel
 import torch
 from PIL import Image
 import io
@@ -30,11 +29,37 @@ import imagehash
 import cv2
 
 
-# Load models
-sbert = SentenceTransformer('all-MiniLM-L6-v2')
-clip_model_name = 'openai/clip-vit-base-patch32'
-clip_model = CLIPModel.from_pretrained(clip_model_name)
-clip_processor = CLIPProcessor.from_pretrained(clip_model_name)
+# Lazy-loaded model instances for core AI features (SBERT, CLIP)
+_models = {
+    "sbert": None,
+    "clip_model": None,
+    "clip_processor": None,
+}
+
+
+def get_sbert():
+    """Lazy load SentenceTransformer model"""
+    if _models["sbert"] is None:
+        print("Loading SentenceTransformer model...")
+        from sentence_transformers import SentenceTransformer
+        _models["sbert"] = SentenceTransformer('all-MiniLM-L6-v2')
+        print("SentenceTransformer loaded.")
+    return _models["sbert"]
+
+
+def get_clip():
+    """Lazy load CLIP model and processor"""
+    if _models["clip_model"] is None or _models["clip_processor"] is None:
+        print("Loading CLIP model...")
+        from transformers import CLIPProcessor, CLIPModel
+        clip_model_name = 'openai/clip-vit-base-patch32'
+        _models["clip_model"] = CLIPModel.from_pretrained(clip_model_name)
+        _models["clip_processor"] = CLIPProcessor.from_pretrained(clip_model_name, use_fast=True)
+        print("CLIP model loaded.")
+    return _models["clip_model"], _models["clip_processor"]
+
+
+print("AI service starting (models will be lazy-loaded on first use)...")
 
 # [CHANGED] Setup Supabase
 SUPABASE_URL = os.getenv('SUPABASE_URL')
@@ -62,6 +87,33 @@ except Exception:
 files_col = db['files']
 
 app = FastAPI(title='AI Microservice')
+
+# Startup event to warm up models in background
+@app.on_event("startup")
+async def startup_event():
+    """Warm up AI models in background after server starts."""
+    import asyncio
+    import threading
+    
+    def warmup_in_thread():
+        """Run model warmup in a separate thread to not block startup."""
+        try:
+            # Import here to avoid circular imports
+            from summarization import warmup_models
+            print("Starting model warmup in background...")
+            warmup_models()
+        except Exception as e:
+            print(f"Model warmup failed: {e}")
+    
+    # Start warmup in background thread after small delay
+    def delayed_warmup():
+        import time
+        time.sleep(5)  # Wait 5 seconds for server to fully start
+        warmup_in_thread()
+    
+    thread = threading.Thread(target=delayed_warmup, daemon=True)
+    thread.start()
+    print("Model warmup scheduled.")
 
 class ProcessInput(BaseModel):
     fileId: str
@@ -101,11 +153,13 @@ def phash_image(buffer):
 
 
 def embedding_from_text_sbert(text):
+    sbert = get_sbert()
     vec = sbert.encode(text)
     return vec.tolist()
 
 
 def embedding_from_text_clip(text):
+    clip_model, clip_processor = get_clip()
     inputs = clip_processor(text=[text], return_tensors='pt', padding=True, truncation=True)
     with torch.no_grad():
         features = clip_model.get_text_features(**inputs)
@@ -114,6 +168,7 @@ def embedding_from_text_clip(text):
 
 
 def embedding_from_image_clip(buffer):
+    clip_model, clip_processor = get_clip()
     img = Image.open(io.BytesIO(buffer)).convert('RGB')
     inputs = clip_processor(images=img, return_tensors='pt')
     with torch.no_grad():
@@ -330,3 +385,297 @@ async def semantic_search(payload: QueryInput):
 
     results.sort(key=lambda x: x['score'], reverse=True)
     return { 'results': results }
+
+
+# ==================== SUMMARIZATION ENDPOINTS ====================
+# Import summarization functions from separate module
+from summarization import (
+    is_summarizable_mimetype,
+    process_file_for_summary,
+    SUMMARIZER_AVAILABLE,
+    BLIP_AVAILABLE,
+    warmup_models
+)
+
+class SummarizeInput(BaseModel):
+    fileId: str
+    minioKey: str
+    mimetype: Optional[str]
+
+
+@app.post('/summarize')
+async def summarize_file(payload: SummarizeInput):
+    """Generate AI summary for a document or image."""
+    import traceback
+    from datetime import datetime
+    
+    key = payload.minioKey
+    file_id = payload.fileId
+    mimetype = (payload.mimetype or '').lower()
+    
+    if not ObjectId.is_valid(file_id):
+        raise HTTPException(status_code=400, detail=f"Invalid ObjectId: {file_id}")
+    
+    # Check if already summarized
+    file_doc = files_col.find_one({'_id': ObjectId(file_id)})
+    if file_doc and file_doc.get('summary') and file_doc.get('summaryStatus') == 'completed':
+        generated_at = file_doc.get('summaryGeneratedAt')
+        # Convert to ISO format string if it's a datetime object
+        if generated_at and hasattr(generated_at, 'isoformat'):
+            generated_at = generated_at.isoformat() + 'Z'
+        return {
+            'status': 'already_summarized',
+            'fileId': file_id,
+            'summary': file_doc.get('summary'),
+            'generatedAt': generated_at
+        }
+    
+    # Check if mimetype is supported
+    if not is_summarizable_mimetype(mimetype):
+        files_col.update_one(
+            {'_id': ObjectId(file_id)},
+            {'$set': {
+                'summaryStatus': 'unsupported',
+                'summaryError': f'File type {mimetype} is not supported for summarization'
+            }}
+        )
+        return {
+            'status': 'unsupported',
+            'fileId': file_id,
+            'message': f'File type {mimetype} is not supported for summarization'
+        }
+    
+    # Mark as processing
+    files_col.update_one(
+        {'_id': ObjectId(file_id)},
+        {'$set': {'summaryStatus': 'processing'}}
+    )
+    
+    try:
+        # Download file from Supabase
+        try:
+            buffer = download_from_supabase(key)
+        except Exception as e:
+            print(f"Supabase Error for key {key}: {e}")
+            files_col.update_one(
+                {'_id': ObjectId(file_id)},
+                {'$set': {'summaryStatus': 'failed', 'summaryError': str(e)}}
+            )
+            raise HTTPException(status_code=404, detail=f"Could not download file from Supabase: {str(e)}")
+        
+        # Process file and generate summary using the summarization module
+        summary = process_file_for_summary(buffer, mimetype)
+        
+        # Save summary to database
+        files_col.update_one(
+            {'_id': ObjectId(file_id)},
+            {'$set': {
+                'summary': summary,
+                'summaryGeneratedAt': datetime.utcnow(),
+                'summaryStatus': 'completed',
+                'summaryError': None
+            }}
+        )
+        
+        return {
+            'status': 'completed',
+            'fileId': file_id,
+            'summary': summary,
+            'generatedAt': datetime.utcnow().isoformat() + 'Z'
+        }
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        traceback.print_exc()
+        files_col.update_one(
+            {'_id': ObjectId(file_id)},
+            {'$set': {'summaryStatus': 'failed', 'summaryError': str(e)}}
+        )
+        raise HTTPException(status_code=500, detail=f"Summarization failed: {str(e)}")
+
+
+@app.get('/summary/{file_id}')
+async def get_summary(file_id: str):
+    """Get existing summary for a file."""
+    if not ObjectId.is_valid(file_id):
+        raise HTTPException(status_code=400, detail=f"Invalid ObjectId: {file_id}")
+    
+    file_doc = files_col.find_one({'_id': ObjectId(file_id)})
+    if not file_doc:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    return {
+        'fileId': file_id,
+        'summary': file_doc.get('summary'),
+        'summaryStatus': file_doc.get('summaryStatus'),
+        'summaryGeneratedAt': file_doc.get('summaryGeneratedAt'),
+        'summaryError': file_doc.get('summaryError')
+    }
+
+
+class BackfillInput(BaseModel):
+    batchSize: Optional[int] = 5
+    userId: Optional[str] = None
+
+
+@app.post('/summary/backfill')
+async def backfill_summaries(payload: BackfillInput):
+    """
+    Backfill summaries for files that don't have them.
+    Processes files in batches to avoid overload.
+    """
+    from datetime import datetime
+    import traceback
+    
+    batch_size = min(payload.batchSize or 5, 20)  # Cap at 20
+    user_id = payload.userId
+    
+    # Build query for files needing summaries
+    query = {
+        '$or': [
+            {'summary': None, 'summaryStatus': {'$nin': ['pending', 'processing', 'unsupported', 'completed']}},
+            {'summaryStatus': 'failed'}
+        ]
+    }
+    
+    # Filter by user if specified
+    if user_id:
+        try:
+            query['userId'] = ObjectId(user_id)
+        except Exception:
+            query['userId'] = user_id
+    
+    # Find files needing summaries
+    files = list(files_col.find(query).limit(batch_size))
+    
+    # Filter to summarizable types
+    summarizable_files = [
+        f for f in files 
+        if is_summarizable_mimetype(f.get('mimetype', ''))
+    ]
+    
+    if not summarizable_files:
+        return {
+            'status': 'complete',
+            'message': 'No files need summarization',
+            'processed': 0,
+            'remaining': 0
+        }
+    
+    results = {
+        'processed': 0,
+        'succeeded': 0,
+        'failed': 0,
+        'details': []
+    }
+    
+    for file_doc in summarizable_files:
+        file_id = str(file_doc['_id'])
+        minio_key = file_doc.get('minioKey', '')
+        mimetype = file_doc.get('mimetype', '')
+        filename = file_doc.get('filename', 'unknown')
+        
+        try:
+            # Mark as processing
+            files_col.update_one(
+                {'_id': file_doc['_id']},
+                {'$set': {'summaryStatus': 'processing'}}
+            )
+            
+            # Download file
+            buffer = download_from_supabase(minio_key)
+            
+            # Generate summary
+            summary = process_file_for_summary(buffer, mimetype)
+            
+            # Save to database
+            files_col.update_one(
+                {'_id': file_doc['_id']},
+                {'$set': {
+                    'summary': summary,
+                    'summaryGeneratedAt': datetime.utcnow(),
+                    'summaryStatus': 'completed',
+                    'summaryError': None
+                }}
+            )
+            
+            results['succeeded'] += 1
+            results['details'].append({
+                'fileId': file_id,
+                'filename': filename,
+                'status': 'completed'
+            })
+            
+        except Exception as e:
+            traceback.print_exc()
+            files_col.update_one(
+                {'_id': file_doc['_id']},
+                {'$set': {
+                    'summaryStatus': 'failed',
+                    'summaryError': str(e)
+                }}
+            )
+            results['failed'] += 1
+            results['details'].append({
+                'fileId': file_id,
+                'filename': filename,
+                'status': 'failed',
+                'error': str(e)
+            })
+        
+        results['processed'] += 1
+    
+    # Count remaining files
+    remaining = files_col.count_documents(query) - results['processed']
+    
+    return {
+        'status': 'batch_complete',
+        'processed': results['processed'],
+        'succeeded': results['succeeded'],
+        'failed': results['failed'],
+        'remaining': max(0, remaining),
+        'details': results['details']
+    }
+
+
+@app.get('/summary/stats')
+async def get_summary_stats():
+    """Get statistics about summary generation status."""
+    pipeline = [
+        {
+            '$group': {
+                '_id': '$summaryStatus',
+                'count': {'$sum': 1}
+            }
+        }
+    ]
+    
+    stats = list(files_col.aggregate(pipeline))
+    
+    stats_map = {
+        'completed': 0,
+        'pending': 0,
+        'processing': 0,
+        'failed': 0,
+        'unsupported': 0,
+        'no_status': 0
+    }
+    
+    for s in stats:
+        status = s['_id']
+        if status is None:
+            stats_map['no_status'] = s['count']
+        else:
+            stats_map[status] = s['count']
+    
+    total = sum(stats_map.values())
+    needs_summary = stats_map['no_status'] + stats_map['failed']
+    
+    return {
+        'totalFiles': total,
+        'summaryStats': stats_map,
+        'needsSummary': needs_summary,
+        'completionRate': round(stats_map['completed'] / total * 100, 2) if total > 0 else 0
+    }
+
