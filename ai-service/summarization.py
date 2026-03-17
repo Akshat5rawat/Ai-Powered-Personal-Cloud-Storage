@@ -7,7 +7,13 @@ Supports PDF, DOCX, DOC, TXT, and image files.
 
 import io
 import re
+import os
 from PIL import Image
+
+# Set HF_TOKEN if available in environment (suppresses HuggingFace Hub warnings)
+hf_token = os.getenv('HF_TOKEN')
+if hf_token:
+    os.environ['HF_TOKEN'] = hf_token
 
 # Document processing imports
 import pdfplumber
@@ -41,17 +47,20 @@ BLIP_AVAILABLE = True
 # ==================== Model Loaders ====================
 
 def get_summarizer():
-    """Lazy load summarization pipeline (DistilBART model - faster than BART)."""
+    """Lazy load summarization model using AutoModelForSeq2SeqLM (more robust than pipeline)."""
     global SUMMARIZER_AVAILABLE
     if _summarization_models["summarizer"] is None and SUMMARIZER_AVAILABLE:
         print("Loading summarization model (DistilBART-CNN - optimized for speed)...")
         try:
-            from transformers import pipeline
-            _summarization_models["summarizer"] = pipeline(
-                "summarization", 
-                model="sshleifer/distilbart-cnn-12-6",  # Faster distilled model
-                device=-1  # CPU
-            )
+            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+            model_name = "sshleifer/distilbart-cnn-12-6"
+            
+            # Load tokenizer and model
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+            
+            # Store both in a tuple for use in summarization
+            _summarization_models["summarizer"] = (model, tokenizer)
             print("Summarization model loaded (DistilBART-CNN).")
         except Exception as e:
             print(f"Warning: Could not load summarization model: {e}")
@@ -89,9 +98,14 @@ def warmup_models():
     print("Warming up summarization models...")
     try:
         # Warm up summarizer with a short text
-        summarizer = get_summarizer()
-        if summarizer:
-            _ = summarizer("This is a test sentence for warming up the summarization model.", max_length=30, min_length=10)
+        result = get_summarizer()
+        if result:
+            import torch
+            model, tokenizer = result
+            test_text = "This is a test sentence for warming up the summarization model. It should be summarized quickly."
+            inputs = tokenizer.encode(test_text, return_tensors="pt", max_length=1024, truncation=True)
+            with torch.no_grad():
+                _ = model.generate(inputs, max_length=30, min_length=10, num_beams=2, early_stopping=True)
             print("Summarizer warmed up.")
     except Exception as e:
         print(f"Summarizer warmup failed: {e}")
@@ -171,9 +185,11 @@ def clean_text_for_summarization(text: str) -> str:
 
 def summarize_text(text: str, max_length: int = 130, min_length: int = 30) -> str:
     """Summarize text using DistilBART model (optimized for speed)."""
-    summarizer = get_summarizer()
-    if not SUMMARIZER_AVAILABLE or not summarizer:
+    model_and_tokenizer = get_summarizer()
+    if not SUMMARIZER_AVAILABLE or not model_and_tokenizer:
         return "Summarization model not available."
+    
+    model, tokenizer = model_and_tokenizer
     
     # Clean text
     text = clean_text_for_summarization(text)
@@ -185,17 +201,23 @@ def summarize_text(text: str, max_length: int = 130, min_length: int = 30) -> st
     text = text[:3000]
     
     try:
-        # Generate summary with optimized parameters
-        summary = summarizer(
-            text, 
-            max_length=max_length, 
-            min_length=min_length, 
-            do_sample=False,
-            truncation=True,
-            num_beams=2,  # Reduced from default 4 for speed
-            early_stopping=True
-        )
-        return summary[0]['summary_text']
+        import torch
+        # Tokenize input
+        inputs = tokenizer.encode(text, return_tensors="pt", max_length=1024, truncation=True)
+        
+        # Generate summary
+        with torch.no_grad():
+            summary_ids = model.generate(
+                inputs,
+                max_length=max_length,
+                min_length=min_length,
+                num_beams=2,
+                early_stopping=True
+            )
+        
+        # Decode summary
+        summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+        return summary
     except Exception as e:
         print(f"Summarization failed: {e}")
         return f"Summarization failed: {str(e)}"

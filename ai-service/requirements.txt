@@ -7,7 +7,7 @@ pydantic
 aiohttp
 httpx
 sentence-transformers
-transformers
+transformers>=4.30.0,<5.0
 torch
 opencv-python-headless
 imagehash
